@@ -222,7 +222,7 @@ pulse report --period today
 
 ## Configuration
 
-The pulse stores configuration in `~/.productivity_tracker/config.json`:
+The pulse stores configuration in `~/.pulse_track_data/config.json`:
 
 ```json
 {
@@ -238,7 +238,7 @@ The pulse stores configuration in `~/.productivity_tracker/config.json`:
 
 ## Data Storage
 
-All data is stored locally in `~/.productivity_tracker/`:
+All data is stored locally in `~/.pulse_track_data/`:
 
 - `config.json`: User configuration settings
 - `activities.json`: Activity logs and time tracking data
@@ -358,7 +358,7 @@ pulse status
 pulse stop --force
 
 # Remove stale PID file
-rm ~/.productivity_tracker/tracker.pid
+rm ~/.pulse_track_data/tracker.pid
 
 # Restart daemon
 pulse start
@@ -368,16 +368,16 @@ pulse start
 
 ```bash
 # Backup your data before clearing
-cp ~/.productivity_tracker/activities.json ~/activities_backup.json
+cp ~/.pulse_track_data/activities.json ~/activities_backup.json
 
 # Clear all data and start fresh
 pulse clear --force
 
 # Validate JSON format
-node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.HOME + '/.productivity_tracker/activities.json')))"
+node -e "console.log(JSON.parse(require('fs').readFileSync(process.env.HOME + '/.pulse_track_data/activities.json')))"
 
 # Reset configuration (keeps activity data)
-rm ~/.productivity_tracker/config.json
+rm ~/.pulse_track_data/config.json
 ```
 
 ## Development

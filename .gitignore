@@ -121,5 +121,5 @@ Thumbs.db
 *.tmp
 
 # User data directory (created by the app)
-.productivity_tracker/
+.pulse_track_data/
 

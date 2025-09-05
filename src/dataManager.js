@@ -33,7 +33,7 @@ class Activity {
 
 class DataManager {
     constructor(dataDir = null) {
-        this.dataDir = dataDir || path.join(os.homedir(), '.productivity_tracker');
+        this.dataDir = dataDir || path.join(os.homedir(), '.pulse_track_data');
         this.configFile = path.join(this.dataDir, 'config.json');
         this.activitiesFile = path.join(this.dataDir, 'activities.json');
         
