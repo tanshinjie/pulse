@@ -1,6 +1,6 @@
 # Pulse
 
-![Pulse Banner](https://raw.githubusercontent.com/yourusername/pulse/main/assets/pulse_github_banner.png)
+![Pulse Banner](https://raw.githubusercontent.com/tanshinjie/pulse/main/assets/pulse_github_banner.png)
 
 A terminal-based productivity tracking application built with Node.js that sends periodic notifications asking what you've been working on. Features clickable notifications that open your terminal with a pre-filled log command, making activity tracking seamless and efficient.
 

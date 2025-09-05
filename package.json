@@ -44,12 +44,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/pulse-app/pulse.git"
+    "url": "https://github.com/tanshinjie/pulse.git"
   },
   "bugs": {
-    "url": "https://github.com/pulse-app/pulse/issues"
+    "url": "https://github.com/tanshinjie/pulse/issues"
   },
-  "homepage": "https://github.com/pulse-app/pulse#readme",
+  "homepage": "https://github.com/tanshinjie/pulse#readme",
   "files": [
     "bin/",
     "src/",
