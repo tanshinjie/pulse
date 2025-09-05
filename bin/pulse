@@ -1,0 +1,11 @@
+#!/usr/bin/env node
+
+const path = require('path');
+
+// Add src directory to require path and run CLI
+const cliPath = path.join(__dirname, '..', 'src', 'cli.js');
+const program = require(cliPath);
+
+// Parse command line arguments
+program.parseAsync();
+

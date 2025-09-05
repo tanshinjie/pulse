@@ -1,0 +1,61 @@
+{
+  "name": "@pulse-app/pulse",
+  "version": "1.0.0",
+  "description": "Mindful productivity tracking with rhythmic check-ins. A terminal-based app that sends periodic notifications and tracks time spent on activities.",
+  "main": "src/cli.js",
+  "bin": {
+    "pulse": "./bin/pulse"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node tests/test.js",
+    "install-global": "npm install -g .",
+    "daemon": "node src/cli.js start",
+    "daemon-fg": "node src/cli.js start --foreground",
+    "prepublishOnly": "npm test"
+  },
+  "keywords": [
+    "pulse",
+    "productivity",
+    "time-tracking",
+    "notifications",
+    "cli",
+    "terminal",
+    "mindful",
+    "focus",
+    "rhythm",
+    "productivity-tracker",
+    "time-management",
+    "work-tracking"
+  ],
+  "author": "Pulse Team <hello@pulse-app.com>",
+  "license": "MIT",
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "commander": "^14.0.0",
+    "fs-extra": "^11.3.1",
+    "inquirer": "^8.2.6",
+    "node-notifier": "^10.0.1",
+    "node-schedule": "^2.1.1",
+    "uuid": "^11.1.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pulse-app/pulse.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pulse-app/pulse/issues"
+  },
+  "homepage": "https://github.com/pulse-app/pulse#readme",
+  "files": [
+    "bin/",
+    "src/",
+    "README.md",
+    "QUICK_START.md",
+    "install.sh",
+    "assets/pulse_github_banner.png"
+  ]
+}
