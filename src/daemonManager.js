@@ -42,7 +42,7 @@ class DaemonManager {
 
         try {
             // Spawn background daemon process
-            const scriptPath = path.join(__dirname, '..', 'bin', 'tracker');
+            const scriptPath = path.join(__dirname, '..', 'bin', 'pulse');
             const child = spawn('node', [scriptPath, 'start', '--daemon'], {
                 detached: true,
                 stdio: ['ignore', 'ignore', 'ignore']
