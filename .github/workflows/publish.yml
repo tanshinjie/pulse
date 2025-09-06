@@ -1,0 +1,129 @@
+name: Publish to npm
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [16.x, 18.x, 20.x]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run tests
+      run: npm test
+      
+    - name: Run security audit
+      run: npm audit --audit-level moderate
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        registry-url: 'https://registry.npmjs.org'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run tests
+      run: npm test
+      
+    - name: Check if version changed
+      id: version-check
+      run: |
+        CURRENT_VERSION=$(node -p "require('./package.json').version")
+        PUBLISHED_VERSION=$(npm view pulse-track-cli version 2>/dev/null || echo "0.0.0")
+        echo "current-version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+        echo "published-version=$PUBLISHED_VERSION" >> $GITHUB_OUTPUT
+        if [ "$CURRENT_VERSION" != "$PUBLISHED_VERSION" ]; then
+          echo "version-changed=true" >> $GITHUB_OUTPUT
+          echo "Version changed from $PUBLISHED_VERSION to $CURRENT_VERSION"
+        else
+          echo "version-changed=false" >> $GITHUB_OUTPUT
+          echo "Version unchanged: $CURRENT_VERSION"
+        fi
+        
+    - name: Publish to npm
+      if: steps.version-check.outputs.version-changed == 'true'
+      run: npm publish --access public
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        
+    - name: Create GitHub Release
+      if: steps.version-check.outputs.version-changed == 'true'
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ steps.version-check.outputs.current-version }}
+        release_name: Release v${{ steps.version-check.outputs.current-version }}
+        body: |
+          ## Changes in v${{ steps.version-check.outputs.current-version }}
+          
+          🎉 New version of Pulse productivity tracker!
+          
+          ### Installation
+          ```bash
+          npx pulse-track-cli
+          # or install globally
+          npm install -g pulse-track-cli
+          ```
+          
+          ### Usage
+          ```bash
+          pulse start          # Start tracking
+          pulse log "message"  # Log activity
+          pulse report         # View reports
+          pulse --help         # See all commands
+          ```
+          
+          See the [README](https://github.com/tanshinjie/pulse#readme) for full documentation.
+        draft: false
+        prerelease: false
+
+  notify:
+    needs: [test, publish]
+    runs-on: ubuntu-latest
+    if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+    - name: Notify success
+      if: needs.publish.result == 'success'
+      run: |
+        echo "✅ Successfully published to npm!"
+        echo "📦 Package: pulse-track-cli"
+        echo "🔗 npm: https://www.npmjs.com/package/pulse-track-cli"
+        
+    - name: Notify failure
+      if: needs.test.result == 'failure' || needs.publish.result == 'failure'
+      run: |
+        echo "❌ Workflow failed!"
+        echo "🔍 Check the logs above for details"
+

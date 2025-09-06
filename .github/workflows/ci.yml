@@ -1,0 +1,169 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Check package.json format
+      run: |
+        if ! jq empty package.json; then
+          echo "❌ package.json is not valid JSON"
+          exit 1
+        else
+          echo "✅ package.json is valid"
+        fi
+        
+    - name: Verify required files
+      run: |
+        required_files=("README.md" "package.json" "src/cli.js" "bin/pulse")
+        for file in "${required_files[@]}"; do
+          if [ ! -f "$file" ]; then
+            echo "❌ Required file missing: $file"
+            exit 1
+          else
+            echo "✅ Found: $file"
+          fi
+        done
+
+  test-matrix:
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node-version: [16.x, 18.x, 20.x]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run tests
+      run: npm test
+      
+    - name: Test CLI commands
+      shell: bash
+      run: |
+        # Test basic CLI functionality
+        node src/cli.js --version
+        node src/cli.js --help
+        node src/cli.js status
+        
+    - name: Test package installation
+      run: |
+        npm pack
+        npm install -g ./pulse-track-cli-*.tgz
+        
+    - name: Test global command (Unix)
+      if: runner.os != 'Windows'
+      run: |
+        pulse --version
+        pulse --help
+        
+    - name: Test global command (Windows)
+      if: runner.os == 'Windows'
+      shell: cmd
+      run: |
+        pulse --version
+        pulse --help
+
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run security audit
+      run: npm audit --audit-level moderate
+      
+    - name: Check for known vulnerabilities
+      run: |
+        if npm audit --audit-level high --json | jq '.vulnerabilities | length' | grep -q '^0$'; then
+          echo "✅ No high-severity vulnerabilities found"
+        else
+          echo "❌ High-severity vulnerabilities detected"
+          npm audit --audit-level high
+          exit 1
+        fi
+
+  package-quality:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20.x'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Check package size
+      run: |
+        npm pack --dry-run
+        SIZE=$(npm pack --dry-run 2>&1 | grep "package size" | awk '{print $4}')
+        echo "Package size: $SIZE"
+        
+        # Convert to bytes for comparison (assuming MB)
+        if [[ $SIZE == *"MB"* ]]; then
+          SIZE_NUM=$(echo $SIZE | sed 's/MB//')
+          SIZE_BYTES=$(echo "$SIZE_NUM * 1024 * 1024" | bc)
+          MAX_SIZE=$((5 * 1024 * 1024))  # 5MB limit
+          
+          if [ $(echo "$SIZE_BYTES > $MAX_SIZE" | bc) -eq 1 ]; then
+            echo "❌ Package too large: $SIZE (max 5MB)"
+            exit 1
+          else
+            echo "✅ Package size acceptable: $SIZE"
+          fi
+        fi
+        
+    - name: Verify npm package contents
+      run: |
+        npm pack --dry-run | grep -E "(bin/|src/|README|package\.json)" || {
+          echo "❌ Essential files missing from npm package"
+          exit 1
+        }
+        echo "✅ Essential files included in package"
+
