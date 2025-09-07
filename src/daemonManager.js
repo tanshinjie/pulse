@@ -3,9 +3,11 @@ const fs = require('fs-extra');
 const path = require('path');
 const os = require('os');
 const { spawn } = require('child_process');
+const EventEmitter = require('events');
 
-class DaemonManager {
+class DaemonManager extends EventEmitter {
     constructor(dataManager, notificationManager) {
+        super();
         this.dataManager = dataManager;
         this.notificationManager = notificationManager;
         this.job = null;
@@ -13,6 +15,8 @@ class DaemonManager {
         
         // PID file for daemon management
         this.pidFile = path.join(dataManager.dataDir, 'tracker.pid');
+        // Status file for IPC communication
+        this.statusFile = path.join(dataManager.dataDir, 'daemon_status.json');
         
         // Setup graceful shutdown
         this.setupSignalHandlers();
@@ -110,6 +114,35 @@ class DaemonManager {
                 console.warn('Could not setup notification handlers:', error.message);
                 // Continue anyway - not critical
             }
+            
+            // Start session monitoring if lock/unlock features are enabled
+            // We need to import SessionManager here since this runs in the daemon process
+            const SessionManager = require('./sessionManager');
+            const Logger = require('./logger');
+            const logger = new Logger(this.dataManager);
+            this.sessionManager = new SessionManager(this, this.dataManager, logger);
+            
+            const sessionConfig = this.sessionManager.getConfig();
+            if (sessionConfig.autoStartOnUnlock || sessionConfig.autoStopOnLock) {
+                console.log('🔒 Starting session monitoring for lock/unlock detection...');
+                await this.sessionManager.startSessionMonitoring();
+                console.log('✅ Session monitoring started in daemon process');
+            }
+            
+            // Write initial status
+            await this.writeStatus();
+            
+            // Update status periodically
+            this.statusInterval = setInterval(async () => {
+                await this.writeStatus();
+            }, 5000); // Update every 5 seconds
+            
+            // Also write a simple status file for easy checking
+            await fs.writeFile(path.join(this.dataManager.dataDir, 'daemon_active.txt'), 
+                `Daemon running since: ${new Date().toISOString()}\nSession monitoring: ${this.sessionManager ? 'active' : 'inactive'}`);
+            
+            // Emit a daemon started event that can be used by other components
+            this.emit('daemon_started');
 
             // Keep process alive
             return new Promise((resolve, reject) => {
@@ -176,12 +209,19 @@ class DaemonManager {
                 this.job.cancel();
                 this.job = null;
             }
+            
+            // Cancel status update interval
+            if (this.statusInterval) {
+                clearInterval(this.statusInterval);
+                this.statusInterval = null;
+            }
 
-            // Remove PID file
+            // Remove PID file and status file
             try {
                 await fs.remove(this.pidFile);
+                await fs.remove(this.statusFile);
             } catch (error) {
-                // Ignore errors when removing PID file
+                // Ignore errors when removing files
             }
 
             this.isRunning = false;
@@ -223,8 +263,32 @@ class DaemonManager {
             isRunning: this.isRunning,
             pidFileExists: fs.existsSync(this.pidFile),
             interval: this.dataManager.getConfig('notificationInterval', 30),
-            nextRun: this.job ? this.job.nextInvocation() : null
+            nextRun: this.job ? this.job.nextInvocation() : null,
+            sessionMonitoringActive: this.sessionManager ? this.sessionManager.isSessionMonitoringActive() : false,
+            sessionState: this.sessionManager ? this.sessionManager.getCurrentSessionState() : null,
+            lockState: this.sessionManager ? this.sessionManager.getCurrentLockState() : null
         };
+    }
+    
+    async writeStatus() {
+        try {
+            const status = this.getStatus();
+            status.timestamp = new Date().toISOString();
+            await fs.writeJson(this.statusFile, status, { spaces: 2 });
+        } catch (error) {
+            console.warn('Failed to write status file:', error.message);
+        }
+    }
+    
+    async readStatus() {
+        try {
+            if (await fs.pathExists(this.statusFile)) {
+                return await fs.readJson(this.statusFile);
+            }
+        } catch (error) {
+            console.warn('Failed to read status file:', error.message);
+        }
+        return null;
     }
 
     async sendCheckInNotification() {

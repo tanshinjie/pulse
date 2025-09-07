@@ -47,7 +47,15 @@ class DataManager {
     loadConfig() {
         const defaultConfig = {
             notificationInterval: 30,
-            dataRetentionDays: 365
+            dataRetentionDays: 365,
+            autoStartOnLogin: true,
+            autoStopOnLogout: true,
+            autoStartOnUnlock: true,
+            autoStopOnLock: true,
+            sessionCheckInterval: 30,
+            logLevel: 'info',
+            logToConsole: false,
+            maxLogSizeMB: 10
         };
 
         try {
@@ -92,19 +100,54 @@ class DataManager {
         }
     }
 
-    addActivity(activity) {
-        const newActivity = new Activity(activity);
+    addActivity(activity, timestamp = null) {
+        const newActivity = new Activity(activity, timestamp);
 
-        // Calculate duration for the previous activity
-        if (this.activities.length > 0) {
-            const lastActivity = this.activities[this.activities.length - 1];
-            const duration = (newActivity.timestamp - lastActivity.timestamp) / (1000 * 60); // minutes
-            lastActivity.durationMinutes = Math.max(0, Math.floor(duration));
-        }
+        // Insert activity in chronological order
+        const insertIndex = this.findInsertIndex(newActivity.timestamp);
+        this.activities.splice(insertIndex, 0, newActivity);
 
-        this.activities.push(newActivity);
+        // Recalculate durations for affected activities
+        this.recalculateDurations(insertIndex);
+
         this.saveActivities();
         return newActivity;
+    }
+
+    findInsertIndex(timestamp) {
+        // Find the correct position to insert the new activity chronologically
+        let left = 0;
+        let right = this.activities.length;
+        
+        while (left < right) {
+            const mid = Math.floor((left + right) / 2);
+            if (this.activities[mid].timestamp <= timestamp) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        
+        return left;
+    }
+
+    recalculateDurations(fromIndex = 0) {
+        // Recalculate durations from the affected index backwards to avoid missing any
+        const startIndex = Math.max(0, fromIndex - 1);
+        
+        for (let i = startIndex; i < this.activities.length; i++) {
+            const current = this.activities[i];
+            const next = this.activities[i + 1];
+            
+            if (next) {
+                // Calculate duration until next activity
+                const duration = (next.timestamp - current.timestamp) / (1000 * 60); // minutes
+                current.durationMinutes = Math.max(0, Math.floor(duration));
+            } else {
+                // Last activity has 0 duration until next activity is logged
+                current.durationMinutes = 0;
+            }
+        }
     }
 
     getRecentActivities(hours = 24) {

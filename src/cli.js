@@ -10,13 +10,17 @@ const os = require('os');
 const { DataManager } = require('./dataManager');
 const NotificationManager = require('./notificationManager');
 const DaemonManager = require('./daemonManager');
+const SessionManager = require('./sessionManager');
+const Logger = require('./logger');
 
 const program = new Command();
 
 // Initialize managers
 const dataManager = new DataManager();
+const logger = new Logger(dataManager);
 const notificationManager = new NotificationManager();
 const daemonManager = new DaemonManager(dataManager, notificationManager);
+const sessionManager = new SessionManager(daemonManager, dataManager, logger);
 
 program
     .name('pulse')
@@ -29,6 +33,9 @@ program
     .description('Log what you\'ve been working on')
     .argument('[activity]', 'Activity description')
     .option('--close', 'Close terminal after logging (useful when called from notifications)')
+    .option('-t, --time <time>', 'Log activity at specific time (HH:MM or YYYY-MM-DD HH:MM)')
+    .option('-d, --date <date>', 'Log activity on specific date (YYYY-MM-DD)')
+    .option('--ago <duration>', 'Log activity X minutes/hours ago (e.g., "30m", "2h")')
     .action(async (activity, options) => {
         try {
             let activityText = activity;
@@ -46,18 +53,42 @@ program
                 activityText = answers.activity;
             }
 
+            // Parse timestamp from options
+            let timestamp = null;
+            if (options.time || options.date || options.ago) {
+                timestamp = parseTimestamp(options);
+            }
+
             // Add the activity
-            const newActivity = dataManager.addActivity(activityText);
+            const newActivity = dataManager.addActivity(activityText, timestamp);
+            
+            // Log the activity
+            await logger.logActivity('logged', activityText, {
+                timestamp: newActivity.timestamp.toISOString(),
+                duration: newActivity.durationMinutes,
+                id: newActivity.id,
+                ...(timestamp && { customTime: true })
+            });
 
             console.log(chalk.green('✅ Logged:'), activityText);
-            console.log(chalk.gray('⏰ Time:'), newActivity.timestamp.toLocaleTimeString());
+            
+            if (timestamp && timestamp < new Date(Date.now() - 60000)) { // More than 1 minute ago
+                console.log(chalk.blue('⏰ Logged at:'), newActivity.timestamp.toLocaleString());
+            } else {
+                console.log(chalk.gray('⏰ Time:'), newActivity.timestamp.toLocaleTimeString());
+            }
 
-            // Show duration of previous activity if exists
-            if (dataManager.activities.length > 1) {
-                const prevActivity = dataManager.activities[dataManager.activities.length - 2];
+            // Show duration information for affected activities
+            const activityIndex = dataManager.activities.findIndex(a => a.id === newActivity.id);
+            if (activityIndex > 0) {
+                const prevActivity = dataManager.activities[activityIndex - 1];
                 if (prevActivity.durationMinutes > 0) {
                     console.log(chalk.yellow('⏱️  Previous activity duration:'), `${prevActivity.durationMinutes} minutes`);
                 }
+            }
+            
+            if (newActivity.durationMinutes > 0) {
+                console.log(chalk.yellow('⏱️  This activity duration:'), `${newActivity.durationMinutes} minutes`);
             }
 
             // Close terminal if --close flag is used (useful for notification clicks)
@@ -108,6 +139,7 @@ program
             }
 
             console.log(chalk.blue('🚀 Starting pulse daemon...'));
+            await logger.logDaemonEvent('start_requested', { foreground: options.foreground });
 
             // Test notification first with enhanced error handling
             console.log('🧪 Testing notification system...');
@@ -126,8 +158,17 @@ program
                 }
                 
                 await daemonManager.start();
+                await logger.logDaemonEvent('started', { mode: 'background' });
+                
                 console.log(chalk.green('✅ Tracker daemon started successfully in background'));
                 console.log(chalk.blue('📅 Notifications every'), `${dataManager.getConfig('notificationInterval')} minutes`);
+                
+                // Check if lock/unlock features are enabled
+                const sessionConfig = sessionManager.getConfig();
+                if (sessionConfig.autoStartOnUnlock || sessionConfig.autoStopOnLock) {
+                    console.log(chalk.blue('🔒 Lock/unlock monitoring will be started in the daemon process'));
+                }
+                
                 console.log(chalk.gray('💡 Use \'pulse log\' to manually log activities'));
                 console.log(chalk.gray('🛑 Use \'pulse stop\' to stop the daemon'));
                 console.log(chalk.gray('📊 Use \'pulse status\' to check daemon status'));
@@ -138,6 +179,7 @@ program
                 }
             }
         } catch (error) {
+            await logger.logError('daemon', error, { action: 'start' });
             console.error(chalk.red('❌ Failed to start daemon:'), error.message);
             
             // Provide helpful troubleshooting
@@ -174,6 +216,7 @@ program
                 }
 
                 await daemonManager.stop();
+                await logger.logDaemonEvent('stopped', { method: 'normal' });
                 console.log(chalk.green('🛑 Tracker daemon stopped'));
             }
         } catch (error) {
@@ -362,32 +405,175 @@ program
 program
     .command('config')
     .description('Configure pulse settings')
-    .argument('<key>', 'Configuration key')
-    .argument('<value>', 'Configuration value')
+    .argument('[key]', 'Configuration key (optional - shows all config if omitted)')
+    .argument('[value]', 'Configuration value (shows current value if omitted)')
     .action(async (key, value) => {
         try {
+            // If no key provided, show all configuration
+            if (!key) {
+                console.log(chalk.blue('⚙️  Pulse Configuration'));
+                console.log('='.repeat(40));
+                
+                // Get all config values
+                const dataConfig = dataManager.config;
+                const sessionConfig = sessionManager.getConfig();
+                
+                // Daemon settings
+                console.log(chalk.yellow('\n📡 Daemon Settings:'));
+                console.log(`  notificationInterval: ${dataConfig.notificationInterval} minutes`);
+                console.log(`  dataRetentionDays: ${dataConfig.dataRetentionDays} days`);
+                
+                // Session management settings
+                console.log(chalk.yellow('\n🔐 Session Management:'));
+                console.log(`  autoStartOnLogin: ${sessionConfig.autoStart}`);
+                console.log(`  autoStopOnLogout: ${sessionConfig.autoStop}`);
+                console.log(`  autoStartOnUnlock: ${sessionConfig.autoStartOnUnlock}`);
+                console.log(`  autoStopOnLock: ${sessionConfig.autoStopOnLock}`);
+                console.log(`  sessionCheckInterval: ${sessionConfig.checkInterval} seconds`);
+
+                // Logging settings
+                const logConfig = logger.getConfig();
+                console.log(chalk.yellow('\n📋 Logging:'));
+                console.log(`  logLevel: ${logConfig.logLevel}`);
+                console.log(`  logToConsole: ${logConfig.logToConsole}`);
+                console.log(`  maxLogSizeMB: ${logConfig.maxLogSizeMB} MB`);
+                console.log(`  logFile: ${logConfig.logFile}`);
+                
+                // Data directory
+                console.log(chalk.yellow('\n📁 Storage:'));
+                console.log(`  dataDir: ${dataManager.dataDir}`);
+                
+                console.log(chalk.blue('\n💡 Usage:'));
+                console.log('  pulse config <key> <value>  Set a configuration value');
+                console.log('  pulse config <key>          Show current value for key');
+                console.log('  pulse config                Show all configuration');
+                
+                return;
+            }
+            
+            // If key provided but no value, show current value
+            if (!value) {
+                let currentValue = null;
+                
+                // Check session manager config first
+                if (['autoStartOnLogin', 'autoStopOnLogout', 'autoStartOnUnlock', 'autoStopOnLock', 'sessionCheckInterval'].includes(key)) {
+                    const sessionConfig = sessionManager.getConfig();
+                    if (key === 'autoStartOnLogin') currentValue = sessionConfig.autoStart;
+                    else if (key === 'autoStopOnLogout') currentValue = sessionConfig.autoStop;
+                    else if (key === 'autoStartOnUnlock') currentValue = sessionConfig.autoStartOnUnlock;
+                    else if (key === 'autoStopOnLock') currentValue = sessionConfig.autoStopOnLock;
+                    else if (key === 'sessionCheckInterval') currentValue = sessionConfig.checkInterval;
+                } else if (['logLevel', 'logToConsole', 'maxLogSizeMB'].includes(key)) {
+                    // Check logger config
+                    const logConfig = logger.getConfig();
+                    if (key === 'logLevel') currentValue = logConfig.logLevel;
+                    else if (key === 'logToConsole') currentValue = logConfig.logToConsole;
+                    else if (key === 'maxLogSizeMB') currentValue = logConfig.maxLogSizeMB;
+                } else {
+                    // Check data manager config
+                    currentValue = dataManager.getConfig(key);
+                }
+                
+                if (currentValue !== null && currentValue !== undefined) {
+                    console.log(chalk.blue(`${key}:`), chalk.green(currentValue));
+                } else {
+                    console.error(chalk.red('❌ Unknown configuration key:'), key);
+                    console.log('\nAvailable keys:');
+                    console.log('  • notificationInterval - Minutes between notifications');
+                    console.log('  • dataRetentionDays - Days to keep activity data');
+                    console.log('  • autoStartOnLogin - Auto-start daemon on login (true/false)');
+                    console.log('  • autoStopOnLogout - Auto-stop daemon on logout (true/false)');
+                    console.log('  • autoStartOnUnlock - Auto-start daemon on screen unlock (true/false)');
+                    console.log('  • autoStopOnLock - Auto-stop daemon on screen lock (true/false)');
+                    console.log('  • sessionCheckInterval - Seconds between session checks');
+                    console.log('  • logLevel - Log level (debug, info, warn, error)');
+                    console.log('  • logToConsole - Log to console (true/false)');
+                    console.log('  • maxLogSizeMB - Maximum log file size in MB');
+                    
+                    console.log(chalk.blue('\n💡 Examples:'));
+                    console.log('  pulse config autoStartOnUnlock true   # Enable auto-start on screen unlock');
+                    console.log('  pulse config autoStopOnLock true      # Enable auto-stop on screen lock');
+                    console.log('  pulse config sessionCheckInterval 15  # Check session every 15 seconds');
+                }
+                return;
+            }
+
+            // Setting a new value
             // Convert value to appropriate type
-            if (key === 'notificationInterval') {
+            if (key === 'notificationInterval' || key === 'sessionCheckInterval' || key === 'maxLogSizeMB') {
                 const numValue = parseInt(value);
                 if (isNaN(numValue) || numValue < 1) {
-                    console.error(chalk.red('❌ Notification interval must be a positive number'));
+                    console.error(chalk.red(`❌ ${key} must be a positive number`));
                     return;
                 }
                 value = numValue;
+            } else if (key === 'autoStartOnLogin' || key === 'autoStopOnLogout' || key === 'autoStartOnUnlock' || 
+                       key === 'autoStopOnLock' || key === 'logToConsole') {
+                // Convert string to boolean
+                value = value.toLowerCase() === 'true' || value === '1';
+                
+                // We only update the config value, not start monitoring
+                // The monitoring will be started when the daemon starts
+            } else if (key === 'logLevel') {
+                if (!['debug', 'info', 'warn', 'error'].includes(value.toLowerCase())) {
+                    console.error(chalk.red('❌ logLevel must be one of: debug, info, warn, error'));
+                    return;
+                }
+                value = value.toLowerCase();
             }
 
-            if (dataManager.setConfig(key, value)) {
+            let configSet = false;
+            
+            // Try session manager config first
+            if (['autoStartOnLogin', 'autoStopOnLogout', 'autoStartOnUnlock', 'autoStopOnLock', 'sessionCheckInterval'].includes(key)) {
+                configSet = sessionManager.updateConfig(key, value);
+            } else if (['logLevel', 'logToConsole', 'maxLogSizeMB'].includes(key)) {
+                // Try logger config
+                configSet = logger.updateConfig(key, value);
+                if (configSet) {
+                    await logger.logConfig('updated', key, value);
+                }
+            } else {
+                // Fallback to data manager
+                configSet = dataManager.setConfig(key, value);
+            }
+
+            if (configSet) {
                 console.log(chalk.green('✅ Set'), `${key} = ${value}`);
 
-                // Restart daemon if it's running and interval changed
+                // Handle special cases
                 if (key === 'notificationInterval' && daemonManager.isAlreadyRunning()) {
                     console.log(chalk.blue('🔄 Restarting daemon with new interval...'));
                     await daemonManager.stop();
                     await daemonManager.start();
+                } else if (key === 'autoStartOnLogin' && value === true) {
+                    console.log(chalk.blue('💡 Pulse will now auto-start when you log in'));
+                } else if (key === 'autoStopOnLogout' && value === true) {
+                    console.log(chalk.blue('💡 Pulse will now auto-stop when you log out'));
+                } else if (key === 'autoStartOnUnlock' && value === true) {
+                    console.log(chalk.blue('💡 Pulse will now auto-start when your screen is unlocked'));
+                    console.log(chalk.gray('💡 Note: You need to start the daemon for this to take effect'));
+                } else if (key === 'autoStopOnLock' && value === true) {
+                    console.log(chalk.blue('💡 Pulse will now auto-stop when your screen is locked'));
+                    console.log(chalk.gray('💡 Note: You need to start the daemon for this to take effect'));
                 }
             } else {
                 console.error(chalk.red('❌ Unknown configuration key:'), key);
-                console.log('Available keys: notificationInterval, dataRetentionDays');
+                console.log('Available keys:');
+                console.log('  • notificationInterval - Minutes between notifications');
+                console.log('  • dataRetentionDays - Days to keep activity data');
+                console.log('  • autoStartOnLogin - Auto-start daemon on login (true/false)');
+                console.log('  • autoStopOnLogout - Auto-stop daemon on logout (true/false)');
+                console.log('  • autoStartOnUnlock - Auto-start daemon on screen unlock (true/false)');
+                console.log('  • autoStopOnLock - Auto-stop daemon on screen lock (true/false)');
+                console.log('  • sessionCheckInterval - Seconds between session checks');
+                console.log('  • logLevel - Log level (debug, info, warn, error)');
+                console.log('  • logToConsole - Log to console (true/false)');
+                console.log('  • maxLogSizeMB - Maximum log file size in MB');
+                
+                console.log(chalk.blue('\n💡 Examples:'));
+                console.log('  pulse config autoStartOnUnlock true   # Enable auto-start on screen unlock');
+                console.log('  pulse config autoStopOnLock true      # Enable auto-stop on screen lock');
             }
         } catch (error) {
             console.error(chalk.red('❌ Error setting config:'), error.message);
@@ -412,6 +598,304 @@ program
             }
         } catch (error) {
             console.error(chalk.red('❌ Notification test error:'), error.message);
+        }
+    });
+
+// Test lock detection command
+program
+    .command('test-lock')
+    .description('Test the screen lock/unlock detection')
+    .option('--lock', 'Simulate screen lock')
+    .option('--unlock', 'Simulate screen unlock')
+    .option('--check', 'Check current lock state')
+    .action(async (options) => {
+        console.log('🧪 Testing screen lock detection...');
+        
+        try {
+            if (!sessionManager.isSessionMonitoringActive()) {
+                console.log(chalk.blue('🔄 Starting session monitoring temporarily...'));
+                await sessionManager.startSessionMonitoring();
+                console.log(chalk.green('✅ Session monitoring started'));
+            }
+            
+            if (options.lock) {
+                console.log(chalk.blue('🔒 Simulating screen lock...'));
+                // Force the lock state to be unlocked first to ensure the change is detected
+                sessionManager.lastLockState = false;
+                sessionManager.handleLockStateChange(true);
+                console.log(chalk.green('✅ Screen lock simulation complete'));
+                console.log(chalk.gray('💡 Check the logs to see if auto-stop was triggered'));
+            } else if (options.unlock) {
+                console.log(chalk.blue('🔓 Simulating screen unlock...'));
+                // Force the lock state to be locked first to ensure the change is detected
+                sessionManager.lastLockState = true;
+                sessionManager.handleLockStateChange(false);
+                console.log(chalk.green('✅ Screen unlock simulation complete'));
+                console.log(chalk.gray('💡 Check the logs to see if auto-start was triggered'));
+            } else {
+                // Default to checking current state
+                const currentState = sessionManager.getCurrentLockState();
+                console.log(chalk.blue('🔍 Current screen state:'), 
+                    currentState === null ? 'Unknown' : 
+                    currentState ? 'Locked' : 'Unlocked');
+                
+                // Also run a fresh check
+                console.log(chalk.blue('🔄 Running a fresh lock state check...'));
+                if (os.platform() === 'darwin') {
+                    await sessionManager.checkMacOSLockState();
+                } else if (os.platform() === 'linux') {
+                    await sessionManager.checkLinuxLockState();
+                } else if (os.platform() === 'win32') {
+                    await sessionManager.checkWindowsLockState();
+                }
+            }
+        } catch (error) {
+            console.error(chalk.red('❌ Lock detection test error:'), error.message);
+        }
+    });
+
+// Logs command
+program
+    .command('logs')
+    .description('View and manage application logs')
+    .option('-n, --lines <number>', 'Number of lines to show', '50')
+    .option('-l, --level <level>', 'Filter by log level (debug, info, warn, error)')
+    .option('-c, --category <category>', 'Filter by category (daemon, session, activity, etc)')
+    .option('-f, --follow', 'Follow logs in real-time (tail -f style)')
+    .option('--since <date>', 'Show logs since date/time (ISO format)')
+    .option('--until <date>', 'Show logs until date/time (ISO format)')
+    .option('--stats', 'Show log statistics')
+    .option('--clear', 'Clear all logs')
+    .option('--raw', 'Show raw JSON format')
+    .action(async (options) => {
+        try {
+            if (options.clear) {
+                const confirm = await inquirer.prompt([
+                    {
+                        type: 'confirm',
+                        name: 'proceed',
+                        message: '⚠️  Are you sure you want to clear all logs?',
+                        default: false
+                    }
+                ]);
+
+                if (confirm.proceed) {
+                    await logger.clearLogs();
+                    console.log(chalk.green('✅ Logs cleared successfully'));
+                } else {
+                    console.log(chalk.yellow('Operation cancelled'));
+                }
+                return;
+            }
+
+            if (options.stats) {
+                const stats = await logger.getLogStats();
+                console.log(chalk.blue('📊 Log Statistics'));
+                console.log('='.repeat(40));
+                console.log(chalk.gray('File:'), stats.logFile);
+                console.log(chalk.gray('Size:'), `${stats.fileSizeMB} MB (${stats.fileSize} bytes)`);
+                console.log(chalk.gray('Last modified:'), stats.lastModified.toLocaleString());
+                console.log(chalk.gray('Total entries (recent):'), stats.totalEntries);
+                
+                if (Object.keys(stats.levelCounts).length > 0) {
+                    console.log(chalk.yellow('\n📈 Log Levels:'));
+                    Object.entries(stats.levelCounts).forEach(([level, count]) => {
+                        const color = level === 'ERROR' ? 'red' : level === 'WARN' ? 'yellow' : 'gray';
+                        console.log(`  ${chalk[color](level)}: ${count}`);
+                    });
+                }
+                
+                if (Object.keys(stats.categoryCounts).length > 0) {
+                    console.log(chalk.yellow('\n📂 Categories:'));
+                    Object.entries(stats.categoryCounts).forEach(([category, count]) => {
+                        console.log(`  ${category}: ${count}`);
+                    });
+                }
+                return;
+            }
+
+            if (options.follow) {
+                console.log(chalk.blue('📄 Following logs... (Press Ctrl+C to stop)'));
+                // Simple implementation - in a real app you'd use a proper tail mechanism
+                let lastSize = 0;
+                const followInterval = setInterval(async () => {
+                    try {
+                        const stats = await fs.stat(logger.logFile);
+                        if (stats.size > lastSize) {
+                            const logs = await logger.readLogs({ lines: 10 });
+                            logs.slice(-5).forEach(entry => {
+                                displayLogEntry(entry, options.raw);
+                            });
+                            lastSize = stats.size;
+                        }
+                    } catch (error) {
+                        // Ignore errors in follow mode
+                    }
+                }, 1000);
+
+                process.on('SIGINT', () => {
+                    clearInterval(followInterval);
+                    console.log(chalk.gray('\n📄 Stopped following logs'));
+                    process.exit(0);
+                });
+                return;
+            }
+
+            // Read logs with filters
+            const logOptions = {
+                lines: parseInt(options.lines) || 50,
+                ...(options.level && { level: options.level }),
+                ...(options.category && { category: options.category }),
+                ...(options.since && { since: options.since }),
+                ...(options.until && { until: options.until })
+            };
+
+            const logs = await logger.readLogs(logOptions);
+            
+            if (logs.length === 0) {
+                console.log(chalk.yellow('📄 No logs found matching criteria'));
+                return;
+            }
+
+            console.log(chalk.blue(`📄 Showing ${logs.length} log entries`));
+            console.log('='.repeat(60));
+
+            logs.forEach(entry => displayLogEntry(entry, options.raw));
+
+        } catch (error) {
+            console.error(chalk.red('❌ Error reading logs:'), error.message);
+        }
+    });
+
+function displayLogEntry(entry, raw = false) {
+    if (raw) {
+        console.log(JSON.stringify(entry, null, 2));
+        return;
+    }
+
+    const timestamp = new Date(entry.timestamp).toLocaleString();
+    const levelColor = {
+        'DEBUG': 'gray',
+        'INFO': 'blue',
+        'WARN': 'yellow',
+        'ERROR': 'red'
+    }[entry.level] || 'white';
+
+    console.log(
+        chalk.gray(`[${timestamp}]`),
+        chalk[levelColor](`[${entry.level}]`),
+        chalk.cyan(`[${entry.category}]`),
+        entry.message
+    );
+
+    if (entry.data) {
+        console.log(chalk.gray('  Data:'), 
+            typeof entry.data === 'object' ? 
+                JSON.stringify(entry.data, null, 4).split('\n').map(line => '    ' + line).join('\n') :
+                entry.data
+        );
+    }
+}
+
+// Session management command
+program
+    .command('session')
+    .description('Manage automatic session start/stop')
+    .option('--start', 'Start session monitoring')
+    .option('--stop', 'Stop session monitoring')
+    .option('--status', 'Show session monitoring status')
+    .option('--enable-auto-start', 'Enable auto-start on login')
+    .option('--disable-auto-start', 'Disable auto-start on login')
+    .option('--enable-auto-stop', 'Enable auto-stop on logout')
+    .option('--disable-auto-stop', 'Disable auto-stop on logout')
+    .option('--enable-auto-start-unlock', 'Enable auto-start on screen unlock')
+    .option('--disable-auto-start-unlock', 'Disable auto-start on screen unlock')
+    .option('--enable-auto-stop-lock', 'Enable auto-stop on screen lock')
+    .option('--disable-auto-stop-lock', 'Disable auto-stop on screen lock')
+    .action(async (options) => {
+        try {
+            if (options.start) {
+                console.log(chalk.blue('🔄 Starting session monitoring...'));
+                await logger.info('session', 'Session monitoring start requested via CLI');
+                await sessionManager.startSessionMonitoring();
+                console.log(chalk.green('✅ Session monitoring started'));
+            } else if (options.stop) {
+                console.log(chalk.blue('🔄 Stopping session monitoring...'));
+                await logger.info('session', 'Session monitoring stop requested via CLI');
+                await sessionManager.stopSessionMonitoring();
+                console.log(chalk.green('✅ Session monitoring stopped'));
+            } else if (options.enableAutoStart) {
+                sessionManager.updateConfig('autoStartOnLogin', true);
+                console.log(chalk.green('✅ Auto-start on login enabled'));
+            } else if (options.disableAutoStart) {
+                sessionManager.updateConfig('autoStartOnLogin', false);
+                console.log(chalk.green('✅ Auto-start on login disabled'));
+            } else if (options.enableAutoStop) {
+                sessionManager.updateConfig('autoStopOnLogout', true);
+                console.log(chalk.green('✅ Auto-stop on logout enabled'));
+            } else if (options.disableAutoStop) {
+                sessionManager.updateConfig('autoStopOnLogout', false);
+                console.log(chalk.green('✅ Auto-stop on logout disabled'));
+            } else if (options.enableAutoStartUnlock) {
+                sessionManager.updateConfig('autoStartOnUnlock', true);
+                console.log(chalk.green('✅ Auto-start on screen unlock enabled'));
+                console.log(chalk.gray('💡 Note: You need to start the daemon for this to take effect'));
+                console.log(chalk.gray('💡 Run: pulse start'));
+            } else if (options.disableAutoStartUnlock) {
+                sessionManager.updateConfig('autoStartOnUnlock', false);
+                console.log(chalk.green('✅ Auto-start on screen unlock disabled'));
+            } else if (options.enableAutoStopLock) {
+                sessionManager.updateConfig('autoStopOnLock', true);
+                console.log(chalk.green('✅ Auto-stop on screen lock enabled'));
+                console.log(chalk.gray('💡 Note: You need to start the daemon for this to take effect'));
+                console.log(chalk.gray('💡 Run: pulse start'));
+            } else if (options.disableAutoStopLock) {
+                sessionManager.updateConfig('autoStopOnLock', false);
+                console.log(chalk.green('✅ Auto-stop on screen lock disabled'));
+            } else {
+                // Default: show status
+                const config = sessionManager.getConfig();
+                const sessionState = sessionManager.getCurrentSessionState();
+                const lockState = sessionManager.getCurrentLockState();
+                
+                console.log(chalk.blue('📊 Session Management Status'));
+                console.log('='.repeat(40));
+                console.log(chalk.gray('Platform:'), os.platform());
+                
+                const isMonitoring = sessionManager.isSessionMonitoringActive();
+                console.log(chalk.gray('Monitoring active:'), isMonitoring ? '✅' : '❌');
+                
+                if (!isMonitoring && (config.autoStartOnUnlock || config.autoStopOnLock)) {
+                    console.log(chalk.yellow('⚠️  Session monitoring is not active. Run "pulse start" to activate it.'));
+                }
+                
+                console.log(chalk.gray('Current session:'), sessionState === null ? 'Unknown' : (sessionState ? 'Active' : 'Inactive'));
+                console.log(chalk.gray('Current screen state:'), lockState === null ? 'Unknown' : (lockState ? 'Locked' : 'Unlocked'));
+                console.log(chalk.gray('Auto-start on login:'), config.autoStart ? '✅' : '❌');
+                console.log(chalk.gray('Auto-stop on logout:'), config.autoStop ? '✅' : '❌');
+                console.log(chalk.gray('Auto-start on unlock:'), config.autoStartOnUnlock ? '✅' : '❌');
+                console.log(chalk.gray('Auto-stop on lock:'), config.autoStopOnLock ? '✅' : '❌');
+                console.log(chalk.gray('Check interval:'), `${config.checkInterval}s`);
+                
+                console.log(chalk.blue('\n💡 Usage:'));
+                console.log('  pulse session --start                     Start session monitoring');
+                console.log('  pulse session --stop                      Stop session monitoring');
+                console.log('  pulse session --enable-auto-start         Enable auto-start on login');
+                console.log('  pulse session --disable-auto-start        Disable auto-start on login');
+                console.log('  pulse session --enable-auto-stop          Enable auto-stop on logout');
+                console.log('  pulse session --disable-auto-stop         Disable auto-stop on logout');
+                console.log('  pulse session --enable-auto-start-unlock  Enable auto-start on screen unlock');
+                console.log('  pulse session --disable-auto-start-unlock Disable auto-start on screen unlock');
+                console.log('  pulse session --enable-auto-stop-lock     Enable auto-stop on screen lock');
+                console.log('  pulse session --disable-auto-stop-lock    Disable auto-stop on screen lock');
+                
+                console.log(chalk.blue('\n💡 Testing Lock/Unlock:'));
+                console.log('  pulse test-lock --check                   Check current lock state');
+                console.log('  pulse test-lock --lock                    Simulate screen lock');
+                console.log('  pulse test-lock --unlock                  Simulate screen unlock');
+            }
+        } catch (error) {
+            console.error(chalk.red('❌ Session management error:'), error.message);
         }
     });
 
@@ -482,6 +966,77 @@ function generateCSV(summary) {
     });
 
     return lines.join('\n');
+}
+
+function parseTimestamp(options) {
+    const now = new Date();
+    
+    if (options.ago) {
+        // Parse duration ago (e.g., "30m", "2h", "1h30m")
+        const match = options.ago.match(/^(\d+)([hm])(?:(\d+)m)?$/);
+        if (!match) {
+            throw new Error('Invalid ago format. Use formats like "30m", "2h", "1h30m"');
+        }
+        
+        let minutes = 0;
+        const value = parseInt(match[1]);
+        const unit = match[2];
+        
+        if (unit === 'h') {
+            minutes = value * 60;
+            if (match[3]) { // Additional minutes (e.g., "1h30m")
+                minutes += parseInt(match[3]);
+            }
+        } else if (unit === 'm') {
+            minutes = value;
+        }
+        
+        return new Date(now.getTime() - minutes * 60 * 1000);
+    }
+    
+    if (options.time) {
+        const timeStr = options.time;
+        
+        // Check if it's full datetime (YYYY-MM-DD HH:MM)
+        if (timeStr.includes('-') && timeStr.includes(' ')) {
+            const parsed = new Date(timeStr);
+            if (isNaN(parsed.getTime())) {
+                throw new Error('Invalid datetime format. Use YYYY-MM-DD HH:MM');
+            }
+            return parsed;
+        }
+        
+        // Just time (HH:MM) - use today's date
+        const timeMatch = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+        if (!timeMatch) {
+            throw new Error('Invalid time format. Use HH:MM or YYYY-MM-DD HH:MM');
+        }
+        
+        const hours = parseInt(timeMatch[1]);
+        const minutes = parseInt(timeMatch[2]);
+        
+        if (hours > 23 || minutes > 59) {
+            throw new Error('Invalid time values');
+        }
+        
+        const baseDate = options.date ? new Date(options.date) : new Date();
+        baseDate.setHours(hours, minutes, 0, 0);
+        return baseDate;
+    }
+    
+    if (options.date) {
+        // Just date (YYYY-MM-DD) - use current time
+        const parsed = new Date(options.date);
+        if (isNaN(parsed.getTime())) {
+            throw new Error('Invalid date format. Use YYYY-MM-DD');
+        }
+        
+        // Set to current time on that date
+        parsed.setHours(now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds());
+        return parsed;
+    }
+    
+    return null;
 }
 
 module.exports = program;
