@@ -254,13 +254,26 @@ program
             const recent = dataManager.getRecentActivities(8);
             if (recent.length > 0) {
                 console.log(chalk.blue('\n📋 Recent activities (last 8 hours):'));
-                recent.slice(-5).forEach(activity => {
+                const recentReversed = recent.slice(-5).reverse();
+                recentReversed.forEach((activity, index) => {
                     const timeStr = activity.timestamp.toLocaleTimeString('en-US', { 
                         hour: '2-digit', 
                         minute: '2-digit' 
                     });
-                    const durationStr = activity.durationMinutes > 0 ? 
-                        chalk.gray(` (${activity.durationMinutes}m)`) : '';
+                    
+                    // For reverse display, calculate duration from previous activity
+                    let durationStr = '';
+                    if (index < recentReversed.length - 1) {
+                        const nextActivity = recentReversed[index + 1];
+                        const duration = Math.floor((activity.timestamp - nextActivity.timestamp) / (1000 * 60));
+                        if (duration > 0) {
+                            durationStr = chalk.gray(` (${duration}m)`);
+                        }
+                    } else if (activity.durationMinutes > 0) {
+                        // For the oldest activity in the display, use its stored duration
+                        durationStr = chalk.gray(` (${activity.durationMinutes}m)`);
+                    }
+                    
                     console.log(`  ${chalk.gray(timeStr)} - ${activity.activity}${durationStr}`);
                 });
             } else {
@@ -384,13 +397,26 @@ program
 
             if (summary.activities.length > 0) {
                 console.log(chalk.blue('\n📋 Recent activities:'));
-                summary.activities.slice(-10).forEach(activity => {
+                const activitiesReversed = summary.activities.slice(-10).reverse();
+                activitiesReversed.forEach((activity, index) => {
                     const timeStr = activity.timestamp.toLocaleTimeString('en-US', { 
                         hour: '2-digit', 
                         minute: '2-digit' 
                     });
-                    const durationStr = activity.duration > 0 ? 
-                        chalk.gray(` (${activity.duration}m)`) : '';
+                    
+                    // For reverse display, calculate duration from previous activity
+                    let durationStr = '';
+                    if (index < activitiesReversed.length - 1) {
+                        const nextActivity = activitiesReversed[index + 1];
+                        const duration = Math.floor((activity.timestamp - nextActivity.timestamp) / (1000 * 60));
+                        if (duration > 0) {
+                            durationStr = chalk.gray(` (${duration}m)`);
+                        }
+                    } else if (activity.duration > 0) {
+                        // For the oldest activity in the display, use its stored duration
+                        durationStr = chalk.gray(` (${activity.duration}m)`);
+                    }
+                    
                     console.log(`  ${chalk.gray(timeStr)} - ${activity.activity}${durationStr}`);
                 });
             }
