@@ -2,6 +2,9 @@
 
 ![Pulse Banner](https://raw.githubusercontent.com/tanshinjie/pulse/main/assets/pulse_github_banner.png)
 
+> ⚠️ **Under Active Development**  
+> This project is currently under active development and is **not ready for production use**. Features may be incomplete, unstable, or subject to breaking changes. Please do not use this software for important productivity tracking until it reaches a stable release.
+
 A terminal-based productivity tracking application built with Node.js that sends periodic notifications asking what you've been working on. Features clickable notifications that open your terminal with a pre-filled log command, making activity tracking seamless and efficient.
 
 ## Features
