@@ -96,11 +96,11 @@ class DaemonManager extends EventEmitter {
             this.isRunning = true;
             console.log(`Daemon started with ${interval}-minute intervals`);
             
-            // Send initial notification with error handling
+            // Send initial test notification with error handling
             try {
-                await this.sendCheckInNotification();
+                await this.notificationManager.testNotification();
             } catch (error) {
-                console.warn('Initial notification failed:', error.message);
+                console.warn('Initial test notification failed:', error.message);
                 // Continue anyway - not critical for startup
             }
             
@@ -327,8 +327,8 @@ class DaemonManager extends EventEmitter {
         console.log(`Notifications scheduled every ${interval} minutes`);
 
         try {
-            // Send initial notification
-            await this.sendCheckInNotification();
+            // Send initial test notification
+            await this.notificationManager.testNotification();
 
             // Schedule recurring notifications
             const cronExpression = `*/${interval} * * * *`;
