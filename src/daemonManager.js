@@ -39,12 +39,31 @@ class DaemonManager extends EventEmitter {
     }
 
     async start() {
-        // Check if another instance is already running
+        // Enhanced duplicate detection with cleanup
+        await this.cleanupStaleDaemons();
+        
         if (this.isAlreadyRunning()) {
             throw new Error('Another instance is already running');
         }
 
+        // Create lock file to prevent race conditions
+        const lockFile = path.join(this.dataManager.dataDir, 'daemon.lock');
         try {
+            // Try to create lock file exclusively
+            await fs.writeFile(lockFile, process.pid.toString(), { flag: 'wx' });
+        } catch (error) {
+            if (error.code === 'EEXIST') {
+                throw new Error('Another daemon startup is in progress');
+            }
+            throw error;
+        }
+
+        try {
+            // Double-check after acquiring lock
+            if (this.isAlreadyRunning()) {
+                throw new Error('Another instance is already running');
+            }
+
             // Spawn background daemon process
             const scriptPath = path.join(__dirname, '..', 'bin', 'pulse');
             const child = spawn('node', [scriptPath, 'start', '--daemon'], {
@@ -52,8 +71,21 @@ class DaemonManager extends EventEmitter {
                 stdio: ['ignore', 'ignore', 'ignore']
             });
 
-            // Write PID file with child process PID
-            await fs.writeFile(this.pidFile, child.pid.toString());
+            // Wait for child to start and write its own PID file
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Daemon startup timeout'));
+                }, 5000);
+
+                // Check every 100ms for PID file
+                const checkInterval = setInterval(async () => {
+                    if (fs.existsSync(this.pidFile)) {
+                        clearTimeout(timeout);
+                        clearInterval(checkInterval);
+                        resolve();
+                    }
+                }, 100);
+            });
             
             // Unref the child so parent can exit
             child.unref();
@@ -66,6 +98,13 @@ class DaemonManager extends EventEmitter {
                 // Ignore cleanup errors
             }
             throw error;
+        } finally {
+            // Always cleanup lock file
+            try {
+                await fs.remove(lockFile);
+            } catch (error) {
+                // Ignore cleanup errors
+            }
         }
     }
 
@@ -76,6 +115,28 @@ class DaemonManager extends EventEmitter {
         }
 
         try {
+            console.log(`🚀 [Process ${process.pid}] Daemon starting up...`);
+            console.log(`📊 Loaded ${this.dataManager.activities.length} activities from disk`);
+            
+            // Check if this is an auto-restart after unlock by looking for recent pause activity
+            const recentActivities = this.dataManager.getRecentActivities(5);
+            const hasRecentLockPause = recentActivities.some(activity => 
+                activity.activity && activity.activity.includes('Automatically paused (screen locked)')
+            );
+            
+            // Also check if the last activity is already a resume to prevent duplicates
+            const lastActivity = recentActivities.length > 0 ? recentActivities[recentActivities.length - 1] : null;
+            const lastIsResume = lastActivity && lastActivity.activity && 
+                                lastActivity.activity.includes('Automatically resumed (screen unlocked)');
+            
+            if (hasRecentLockPause && !lastIsResume) {
+                console.log('🔓 Detected auto-restart after screen unlock, adding resume activity');
+                this.dataManager.addActivity('Automatically resumed (screen unlocked)');
+                console.log(`📊 Activities count after adding resume: ${this.dataManager.activities.length}`);
+            } else if (lastIsResume) {
+                console.log('⏩ Last activity is already a resume, skipping duplicate');
+            }
+            
             // Write PID file
             await fs.writeFile(this.pidFile, process.pid.toString());
 
@@ -173,87 +234,175 @@ class DaemonManager extends EventEmitter {
     }
 
     async stop() {
-        // For background processes, we need to signal the PID from the file
-        if (!this.isRunning && fs.existsSync(this.pidFile)) {
+        console.log('🛑 Stopping daemon(s)...');
+        
+        // Enhanced stop logic: Find and stop ALL daemon processes
+        try {
+            // First, find all running daemon processes
+            const { exec } = require('child_process');
+            const { promisify } = require('util');
+            const execAsync = promisify(exec);
+            
+            let stoppedProcesses = 0;
+            
             try {
-                const pid = parseInt(fs.readFileSync(this.pidFile, 'utf8'));
-                try {
-                    process.kill(pid, 'SIGTERM');
-                    // Wait a bit for graceful shutdown
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                const { stdout } = await execAsync('ps aux | grep "pulse.*--daemon" | grep -v grep');
+                const processes = stdout.split('\n').filter(line => line.trim());
+                
+                if (processes.length > 0) {
+                    console.log(`🔍 Found ${processes.length} daemon process(es) to stop`);
                     
-                    // Remove PID file
-                    await fs.remove(this.pidFile);
-                    console.log('Daemon stopped');
-                    return;
-                } catch (error) {
-                    // Process might already be stopped, just clean up PID file
-                    await fs.remove(this.pidFile);
-                    console.log('Daemon was not running, cleaned up PID file');
-                    return;
+                    // Parse PIDs and stop each process
+                    const pids = processes.map(line => {
+                        const parts = line.trim().split(/\s+/);
+                        return parseInt(parts[1]); // PID is second column
+                    }).filter(pid => !isNaN(pid));
+                    
+                    for (const pid of pids) {
+                        try {
+                            console.log(`🔫 Stopping daemon process ${pid}...`);
+                            process.kill(pid, 'SIGTERM');
+                            stoppedProcesses++;
+                        } catch (error) {
+                            console.warn(`Failed to stop process ${pid}:`, error.message);
+                        }
+                    }
+                    
+                    // Wait for graceful shutdown
+                    if (stoppedProcesses > 0) {
+                        console.log('⏳ Waiting for graceful shutdown...');
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        
+                        // Check if any are still running and force kill them
+                        try {
+                            const { stdout: stillRunning } = await execAsync('ps aux | grep "pulse.*--daemon" | grep -v grep');
+                            const stillRunningProcesses = stillRunning.split('\n').filter(line => line.trim());
+                            
+                            if (stillRunningProcesses.length > 0) {
+                                console.log(`💀 Force killing ${stillRunningProcesses.length} stubborn process(es)...`);
+                                const stubborn_pids = stillRunningProcesses.map(line => {
+                                    const parts = line.trim().split(/\s+/);
+                                    return parseInt(parts[1]);
+                                }).filter(pid => !isNaN(pid));
+                                
+                                for (const pid of stubborn_pids) {
+                                    try {
+                                        process.kill(pid, 'SIGKILL');
+                                        console.log(`💀 Force killed process ${pid}`);
+                                    } catch (error) {
+                                        // Process already dead
+                                    }
+                                }
+                            }
+                        } catch (error) {
+                            // No processes still running - that's good
+                        }
+                    }
                 }
             } catch (error) {
-                console.error('Error stopping daemon:', error.message);
-                return;
-            }
-        }
-
-        if (!this.isRunning) {
-            console.log('Daemon is not running');
-            return;
-        }
-
-        try {
-            // Cancel scheduled job
-            if (this.job) {
-                this.job.cancel();
-                this.job = null;
+                // No daemon processes found via ps
+                console.log('ℹ️ No daemon processes found via ps command');
             }
             
-            // Cancel status update interval
-            if (this.statusInterval) {
-                clearInterval(this.statusInterval);
-                this.statusInterval = null;
-            }
-
-            // Remove PID file and status file
-            try {
+            // Also handle the traditional single PID file approach
+            if (fs.existsSync(this.pidFile)) {
+                try {
+                    const pid = parseInt(fs.readFileSync(this.pidFile, 'utf8'));
+                    try {
+                        process.kill(pid, 'SIGTERM');
+                        console.log(`🔫 Also stopped daemon from PID file: ${pid}`);
+                        stoppedProcesses++;
+                    } catch (error) {
+                        // Process might already be stopped
+                    }
+                } catch (error) {
+                    console.warn('Error reading PID file:', error.message);
+                }
+                
+                // Clean up PID file
                 await fs.remove(this.pidFile);
-                await fs.remove(this.statusFile);
-            } catch (error) {
-                // Ignore errors when removing files
             }
-
-            this.isRunning = false;
-            console.log('Daemon stopped');
+            
+            // Handle current process if it's a daemon
+            if (this.isRunning) {
+                console.log('🔫 Stopping current daemon process...');
+                
+                // Cancel scheduled job
+                if (this.job) {
+                    this.job.cancel();
+                    this.job = null;
+                }
+                
+                // Cancel status update interval
+                if (this.statusInterval) {
+                    clearInterval(this.statusInterval);
+                    this.statusInterval = null;
+                }
+                
+                this.isRunning = false;
+                stoppedProcesses++;
+            }
+            
+            // Clean up status files
+            try {
+                await fs.remove(this.statusFile);
+                await fs.remove(path.join(this.dataManager.dataDir, 'daemon_active.txt'));
+            } catch (error) {
+                // Ignore cleanup errors
+            }
+            
+            if (stoppedProcesses > 0) {
+                console.log(`✅ Successfully stopped ${stoppedProcesses} daemon process(es)`);
+            } else {
+                console.log('ℹ️ No daemon processes were running');
+            }
+            
         } catch (error) {
-            console.error('Error stopping daemon:', error.message);
+            console.error('❌ Error during daemon stop:', error.message);
             throw error;
         }
     }
 
     isAlreadyRunning() {
         try {
-            if (!fs.existsSync(this.pidFile)) {
-                return false;
-            }
-
-            const pid = parseInt(fs.readFileSync(this.pidFile, 'utf8'));
+            // Enhanced daemon detection: check for ANY daemon processes
+            const { execSync } = require('child_process');
             
-            // Check if process is actually running
             try {
-                process.kill(pid, 0); // Doesn't actually kill, just checks if process exists
-                return true;
-            } catch (error) {
-                // Process doesn't exist, remove stale PID file
-                try {
-                    fs.removeSync(this.pidFile);
-                } catch (removeError) {
-                    // Ignore removal errors
+                const stdout = execSync('ps aux | grep "pulse.*--daemon" | grep -v grep', { encoding: 'utf8' });
+                const processes = stdout.split('\n').filter(line => line.trim());
+                
+                if (processes.length > 0) {
+                    console.log(`🔍 Found ${processes.length} running daemon process(es)`);
+                    return true;
                 }
-                return false;
+            } catch (error) {
+                // No daemon processes found via ps
             }
+            
+            // Also check traditional PID file method as fallback
+            if (fs.existsSync(this.pidFile)) {
+                const pid = parseInt(fs.readFileSync(this.pidFile, 'utf8'));
+                
+                // Check if process is actually running
+                try {
+                    process.kill(pid, 0); // Doesn't actually kill, just checks if process exists
+                    console.log(`🔍 Found daemon via PID file: ${pid}`);
+                    return true;
+                } catch (error) {
+                    // Process doesn't exist, remove stale PID file
+                    try {
+                        fs.removeSync(this.pidFile);
+                        console.log('🗑️ Removed stale PID file');
+                    } catch (removeError) {
+                        // Ignore removal errors
+                    }
+                }
+            }
+            
+            return false;
         } catch (error) {
+            console.warn('Error checking if daemon is running:', error.message);
             return false;
         }
     }
@@ -388,6 +537,78 @@ class DaemonManager extends EventEmitter {
             console.warn('Error during force stop:', error.message);
         }
         return false;
+    }
+    
+    // Clean up stale daemon processes and PID files
+    async cleanupStaleDaemons() {
+        try {
+            console.log('🧹 Cleaning up stale daemon processes...');
+            
+            // Find all pulse daemon processes
+            const { exec } = require('child_process');
+            const { promisify } = require('util');
+            const execAsync = promisify(exec);
+            
+            try {
+                const { stdout } = await execAsync('ps aux | grep "pulse.*--daemon" | grep -v grep');
+                const processes = stdout.split('\n').filter(line => line.trim());
+                
+                console.log(`Found ${processes.length} daemon processes`);
+                
+                if (processes.length > 1) {
+                    console.warn(`⚠️ Multiple daemon processes detected! Cleaning up duplicates...`);
+                    
+                    // Parse PIDs from ps output
+                    const pids = processes.map(line => {
+                        const parts = line.trim().split(/\s+/);
+                        return parseInt(parts[1]); // PID is second column
+                    }).filter(pid => !isNaN(pid));
+                    
+                    // Keep the oldest process (first in list) and kill the rest
+                    const pidsToKill = pids.slice(1);
+                    
+                    for (const pid of pidsToKill) {
+                        try {
+                            console.log(`🔫 Killing duplicate daemon process ${pid}`);
+                            process.kill(pid, 'SIGTERM');
+                            
+                            // Wait a bit, then force kill if needed
+                            setTimeout(() => {
+                                try {
+                                    process.kill(pid, 0); // Check if still running
+                                    process.kill(pid, 'SIGKILL');
+                                    console.log(`💀 Force killed process ${pid}`);
+                                } catch (error) {
+                                    // Process already dead
+                                }
+                            }, 2000);
+                            
+                        } catch (error) {
+                            console.warn(`Failed to kill process ${pid}:`, error.message);
+                        }
+                    }
+                }
+            } catch (error) {
+                // No processes found or ps command failed - that's okay
+                console.log('No duplicate daemon processes found');
+            }
+            
+            // Clean up any orphaned PID files
+            if (fs.existsSync(this.pidFile)) {
+                try {
+                    const pid = parseInt(fs.readFileSync(this.pidFile, 'utf8'));
+                    process.kill(pid, 0); // Check if process exists
+                    console.log(`✅ PID file valid - process ${pid} is running`);
+                } catch (error) {
+                    // Process doesn't exist, remove stale PID file
+                    console.log('🗑️ Removing stale PID file');
+                    await fs.remove(this.pidFile);
+                }
+            }
+            
+        } catch (error) {
+            console.warn('Error during stale daemon cleanup:', error.message);
+        }
     }
 }
 

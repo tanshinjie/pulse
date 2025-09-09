@@ -312,8 +312,8 @@ class SessionManager extends EventEmitter {
                 console.log('Auto-stopping daemon on user logout...');
                 if (this.logger) await this.logger.logSessionEvent('auto_stop_attempting', { trigger: 'logout' });
                 
-                // Log automatic pause activity
-                this.dataManager.addActivity('Automatically paused (user logged out)');
+                // Enhanced data persistence before shutdown
+                await this.ensureDataPersistence('user logged out');
                 
                 await this.daemonManager.stop();
                 console.log('Daemon auto-stopped successfully');
@@ -449,166 +449,116 @@ class SessionManager extends EventEmitter {
         return new Promise((resolve) => {
             console.log('🔍 Checking macOS lock state...');
             
-            // Log the start of lock state check
-            if (this.logger) {
-                this.logger.debug('session', 'Starting macOS lock state check - Method 1: ScreenSaverEngine');
-            }
+            // Simplified and more reliable lock detection
+            // Use a combination of methods to determine lock state more accurately
+            
+            let lockCheckPromises = [];
+            let lockCheckResults = [];
             
             // Method 1: Check if screensaver is running
-            exec('pgrep -x ScreenSaverEngine', (error, stdout) => {
-                const screensaverActive = !error && stdout.trim().length > 0;
-                
-                if (this.logger) {
-                    this.logger.debug('session', 'ScreenSaverEngine check result', { 
-                        error: error ? error.message : null,
-                        stdout: stdout.trim(),
-                        screensaverActive 
-                    });
-                }
-                
-                if (screensaverActive) {
-                    console.log('🔒 ScreenSaverEngine detected - screen is locked');
-                    if (this.logger) {
-                        this.logger.logSessionEvent('lock_detected_via_screensaver', { method: 'ScreenSaverEngine' });
-                    }
-                    this.handleLockStateChange(true);
-                    resolve();
-                    return;
-                }
-                
-                // Method 2: Check if loginwindow is showing lock screen (for Cmd+Ctrl+Q)
-                // We need to check if loginwindow is running AND if it's showing the lock screen
-                if (this.logger) {
-                    this.logger.debug('session', 'Starting macOS lock state check - Method 2: LoginWindow');
-                }
-                
-                exec('ps aux | grep loginwindow | grep -v grep', (error, stdout) => {
-                    const loginWindowRunning = !error && stdout.trim().length > 0;
-                    
-                    if (this.logger) {
-                        this.logger.debug('session', 'LoginWindow check result', { 
-                            error: error ? error.message : null,
-                            stdout: stdout.trim(),
-                            loginWindowRunning 
-                        });
-                    }
-                    
-                    if (loginWindowRunning) {
-                        console.log('🔍 Login window detected, checking if showing lock screen...');
-                        if (this.logger) {
-                            this.logger.debug('session', 'LoginWindow detected, checking lock screen visibility via AppleScript');
-                        }
-                        
-                        // Use AppleScript to check if the lock screen is actually visible
-                        const lockScreenScript = `
-                        tell application "System Events"
-                            try
-                                -- Check if login window is the frontmost application
-                                set frontApp to name of first application process whose frontmost is true
-                                if frontApp is "loginwindow" then
-                                    return true
-                                end if
-                                
-                                -- Check if login window has any visible windows
-                                set loginProcess to first application process whose name is "loginwindow"
-                                set windowCount to count of windows of loginProcess
-                                if windowCount > 0 then
-                                    return true
-                                end if
-                                
-                                return false
-                            on error
-                                return false
-                            end try
-                        end tell`;
-                        
-                        exec(`osascript -e '${lockScreenScript}'`, (error, stdout) => {
-                            const isLockScreenVisible = !error && stdout.trim() === 'true';
-                            console.log(`Lock screen visibility check: ${isLockScreenVisible ? 'visible' : 'not visible'}`);
-                            
-                            if (this.logger) {
-                                this.logger.debug('session', 'AppleScript lock screen check result', { 
-                                    error: error ? error.message : null,
-                                    stdout: stdout.trim(),
-                                    isLockScreenVisible 
-                                });
-                            }
-                            
-                            if (isLockScreenVisible) {
-                                console.log('🔒 Lock screen is visible - screen is locked');
-                                if (this.logger) {
-                                    this.logger.logSessionEvent('lock_detected_via_loginwindow', { method: 'LoginWindow + AppleScript' });
-                                }
-                                this.handleLockStateChange(true);
-                                resolve();
-                                return;
-                            }
-                            
-                            // Method 3: Check display power state as fallback
-                            if (this.logger) {
-                                this.logger.debug('session', 'Starting macOS lock state check - Method 3: Display Power State');
-                            }
-                            
-                            exec('ioreg -n IODisplayWrangler | grep -i IOPowerManagement', (error, stdout) => {
-                                let isLocked = false;
-                                
-                                if (this.logger) {
-                                    this.logger.debug('session', 'Display power state check result', { 
-                                        error: error ? error.message : null,
-                                        stdout: stdout.trim(),
-                                        hasOutput: !error && stdout.trim().length > 0
-                                    });
-                                }
-                                
-                                if (!error && stdout.trim().length > 0) {
-                                    try {
-                                        console.log('Display power state output:', stdout);
-                                        const match = stdout.match(/"CurrentPowerState"\s*=\s*(\d+)/);
-                                        if (match && match[1]) {
-                                            // CurrentPowerState = 4 means display is on, 0 means off/locked
-                                            isLocked = parseInt(match[1]) === 0;
-                                            console.log(`Display power state: ${match[1]} (${isLocked ? 'locked' : 'unlocked'})`);
-                                            
-                                            if (this.logger) {
-                                                this.logger.debug('session', 'Display power state parsed', { 
-                                                    powerState: match[1],
-                                                    isLocked,
-                                                    method: 'Display Power State'
-                                                });
-                                            }
-                                        }
-                                    } catch (parseError) {
-                                        console.warn('Error parsing display power state:', parseError.message);
-                                        if (this.logger) {
-                                            this.logger.warn('session', 'Error parsing display power state', { error: parseError.message });
-                                        }
-                                    }
-                                }
-                                
-                                console.log(`Final lock state determination: ${isLocked ? 'locked' : 'unlocked'}`);
-                                if (this.logger) {
-                                    this.logger.debug('session', 'Final lock state determination', { 
-                                        isLocked,
-                                        method: 'Display Power State (fallback)'
-                                    });
-                                }
-                                this.handleLockStateChange(isLocked);
-                                resolve();
-                            });
+            const screensaverCheck = new Promise((resolveCheck) => {
+                exec('pgrep -x ScreenSaverEngine', (error, stdout) => {
+                    const screensaverActive = !error && stdout.trim().length > 0;
+                    console.log(`🔍 ScreenSaverEngine check: ${screensaverActive ? 'active' : 'inactive'}`);
+                    resolveCheck({ method: 'screensaver', locked: screensaverActive, confidence: screensaverActive ? 0.9 : 0.1 });
+                });
+            });
+            
+            // Method 2: Check display brightness (more reliable than power state)
+            const brightnessCheck = new Promise((resolveCheck) => {
+                exec('brightness -l', (error, stdout) => {
+                    if (error) {
+                        // If brightness command fails, try system_profiler
+                        exec('system_profiler SPDisplaysDataType | grep Resolution', (error2, stdout2) => {
+                            const displaysDetected = !error2 && stdout2.trim().length > 0;
+                            console.log(`🔍 Display detection: ${displaysDetected ? 'displays active' : 'no active displays'}`);
+                            resolveCheck({ method: 'display', locked: !displaysDetected, confidence: 0.3 });
                         });
                     } else {
-                        console.log('🔓 No lock indicators found - assuming unlocked');
-                        if (this.logger) {
-                            this.logger.debug('session', 'No lock indicators found, assuming unlocked', { 
-                                method: 'No indicators found'
-                            });
-                        }
-                        this.handleLockStateChange(false);
-                        resolve();
+                        // If we can read brightness, screen is likely unlocked
+                        const hasOutput = stdout.trim().length > 0;
+                        console.log(`🔍 Brightness check: ${hasOutput ? 'readable' : 'not readable'}`);
+                        resolveCheck({ method: 'brightness', locked: !hasOutput, confidence: hasOutput ? 0.7 : 0.5 });
                     }
                 });
             });
+            
+            // Method 3: Check if we can access UI elements via AppleScript
+            const uiAccessCheck = new Promise((resolveCheck) => {
+                const quickUIScript = `
+                tell application "System Events"
+                    try
+                        -- Try to get desktop items (only works when unlocked)
+                        set desktopItems to count of desktop 1
+                        return true
+                    on error
+                        return false
+                    end try
+                end tell`;
+                
+                exec(`osascript -e '${quickUIScript}'`, (error, stdout) => {
+                    const canAccessUI = !error && stdout.trim() === 'true';
+                    console.log(`🔍 UI access check: ${canAccessUI ? 'accessible' : 'blocked'}`);
+                    resolveCheck({ method: 'ui_access', locked: !canAccessUI, confidence: canAccessUI ? 0.8 : 0.6 });
+                });
+            });
+            
+            lockCheckPromises.push(screensaverCheck, brightnessCheck, uiAccessCheck);
+            
+            // Wait for all checks to complete (with timeout)
+            const checkTimeout = setTimeout(() => {
+                console.log('⏰ Lock state check timeout, using available results');
+                this.evaluateLockState(lockCheckResults, resolve);
+            }, 5000); // 5 second timeout
+            
+            Promise.allSettled(lockCheckPromises).then((results) => {
+                clearTimeout(checkTimeout);
+                lockCheckResults = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+                this.evaluateLockState(lockCheckResults, resolve);
+            });
         });
+    }
+    
+    // Evaluate lock state based on multiple check results
+    evaluateLockState(results, resolve) {
+        console.log(`🔍 Evaluating lock state from ${results.length} checks:`, results);
+        
+        if (results.length === 0) {
+            console.log('🤷 No lock check results available, assuming unlocked');
+            this.handleLockStateChange(false);
+            resolve();
+            return;
+        }
+        
+        // Calculate weighted score
+        let lockedScore = 0;
+        let totalConfidence = 0;
+        
+        results.forEach(result => {
+            const weight = result.locked ? result.confidence : (1 - result.confidence);
+            lockedScore += weight;
+            totalConfidence += result.confidence;
+        });
+        
+        const averageScore = lockedScore / results.length;
+        const isLocked = averageScore > 0.5;
+        
+        console.log(`🔍 Lock state evaluation: score=${averageScore.toFixed(2)}, locked=${isLocked}`);
+        
+        // Log high-confidence results
+        const highConfidenceResults = results.filter(r => r.confidence > 0.7);
+        if (highConfidenceResults.length > 0) {
+            const definitiveResult = highConfidenceResults.find(r => r.locked);
+            if (definitiveResult) {
+                console.log(`🔒 High confidence lock detection via ${definitiveResult.method}`);
+                this.handleLockStateChange(true);
+                resolve();
+                return;
+            }
+        }
+        
+        this.handleLockStateChange(isLocked);
+        resolve();
     }
     
     async startLinuxLockMonitoring() {
@@ -758,7 +708,7 @@ class SessionManager extends EventEmitter {
     }
     
     async handleUnlock() {
-        console.log('🔓 handleUnlock called - screen unlocked detected');
+        console.log(`🔓 [Process ${process.pid}] handleUnlock called - screen unlocked detected`);
         console.log(`🔧 autoStartOnUnlock config: ${this.config.autoStartOnUnlock}`);
         
         if (!this.config.autoStartOnUnlock) {
@@ -767,17 +717,46 @@ class SessionManager extends EventEmitter {
             return;
         }
         
+        // CRITICAL FIX: Check if this process is itself a daemon process
+        // If so, it should NOT spawn another daemon!
+        const isDaemonProcess = this.daemonManager.isRunning || process.argv.includes('--daemon');
+        console.log(`🔍 Is this process a daemon? ${isDaemonProcess}`);
+        
+        if (isDaemonProcess) {
+            console.log('✅ This process is already the daemon - no need to start another');
+            console.log('🔓 Daemon resumed from screen unlock');
+            
+            // Just log the resume activity since this daemon is continuing to run
+            const recentActivities = this.dataManager.getRecentActivities(3);
+            const lastActivity = recentActivities.length > 0 ? recentActivities[recentActivities.length - 1] : null;
+            const lastIsResume = lastActivity && lastActivity.activity && 
+                                lastActivity.activity.includes('Automatically resumed');
+                                
+            if (!lastIsResume) {
+                this.dataManager.addActivity('Automatically resumed (screen unlocked)');
+                console.log('📝 Added resume activity to current daemon process');
+            }
+            
+            if (this.logger) await this.logger.logSessionEvent('daemon_resume_on_unlock', { trigger: 'unlock' });
+            return;
+        }
+        
         try {
+            // Add extra delay to ensure previous daemon has fully shut down
+            console.log('⏳ Waiting for potential previous daemon shutdown...');
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
             const isRunning = this.daemonManager.isAlreadyRunning();
             console.log(`🔍 Daemon running status: ${isRunning ? 'running' : 'not running'}`);
             
             if (!isRunning) {
                 console.log('🚀 Auto-starting daemon on screen unlock...');
                 if (this.logger) await this.logger.logSessionEvent('auto_start_attempting', { trigger: 'unlock' });
-                await this.daemonManager.start();
                 
-                // Log resuming activity
-                this.dataManager.addActivity('Automatically resumed (screen unlocked)');
+                // Check current data before starting
+                console.log(`📊 Current activities count before restart: ${this.dataManager.activities.length}`);
+                
+                await this.daemonManager.start();
                 
                 console.log('✅ Daemon auto-started successfully on unlock');
                 if (this.logger) await this.logger.logSessionEvent('auto_start_success', { trigger: 'unlock' });
@@ -794,10 +773,37 @@ class SessionManager extends EventEmitter {
     async handleLock() {
         console.log('🔒 handleLock called - screen lock detected');
         console.log(`🔧 autoStopOnLock config: ${this.config.autoStopOnLock}`);
+        console.log(`🔧 autoStartOnUnlock config: ${this.config.autoStartOnUnlock}`);
         
         if (!this.config.autoStopOnLock) {
             console.log('❌ Auto-stop on lock is disabled in config, skipping');
             if (this.logger) await this.logger.logSessionEvent('auto_stop_skipped', { reason: 'lock_disabled' });
+            return;
+        }
+        
+        // CRITICAL FIX: If both auto-stop on lock AND auto-start on unlock are enabled,
+        // the daemon should NOT actually stop - just pause activity tracking
+        // Otherwise there would be no daemon running to detect unlock!
+        const shouldKeepRunningForUnlock = this.config.autoStartOnUnlock;
+        
+        if (shouldKeepRunningForUnlock) {
+            console.log('🔄 Both auto-stop and auto-start enabled - daemon will pause (not stop) to handle unlock');
+            
+            // Just log the pause activity and save data, but keep daemon running
+            const recentActivities = this.dataManager.getRecentActivities(3);
+            const lastActivity = recentActivities.length > 0 ? recentActivities[recentActivities.length - 1] : null;
+            const lastIsPause = lastActivity && lastActivity.activity && 
+                               lastActivity.activity.includes('Automatically paused');
+            
+            if (!lastIsPause) {
+                console.log('📝 Adding pause activity (daemon continues running)');
+                this.dataManager.addActivity('Automatically paused (screen locked)');
+                this.dataManager.saveActivities();
+                this.dataManager.saveConfig();
+            }
+            
+            console.log('⏸️ Daemon paused for screen lock (will auto-resume on unlock)');
+            if (this.logger) await this.logger.logSessionEvent('daemon_pause_on_lock', { trigger: 'lock' });
             return;
         }
         
@@ -809,8 +815,8 @@ class SessionManager extends EventEmitter {
                 console.log('🛑 Auto-stopping daemon on screen lock...');
                 if (this.logger) await this.logger.logSessionEvent('auto_stop_attempting', { trigger: 'lock' });
                 
-                // Log automatic pause activity
-                this.dataManager.addActivity('Automatically paused (screen locked)');
+                // Enhanced data persistence before shutdown
+                await this.ensureDataPersistence('screen locked');
                 
                 await this.daemonManager.stop();
                 console.log('✅ Daemon auto-stopped successfully on lock');
@@ -822,6 +828,109 @@ class SessionManager extends EventEmitter {
         } catch (error) {
             console.error('❌ Failed to auto-stop daemon on lock:', error.message);
             if (this.logger) await this.logger.logError('session', error, { action: 'auto_stop', trigger: 'lock' });
+        }
+    }
+    
+    // Enhanced data persistence method to prevent data loss
+    async ensureDataPersistence(reason) {
+        console.log(`💾 [Process ${process.pid}] Ensuring data persistence before shutdown...`);
+        console.log(`📊 Current activities count: ${this.dataManager.activities.length}`);
+        
+        try {
+            // Check if the last activity is already a pause to prevent duplicates
+            const recentActivities = this.dataManager.getRecentActivities(3);
+            const lastActivity = recentActivities.length > 0 ? recentActivities[recentActivities.length - 1] : null;
+            const lastIsPause = lastActivity && lastActivity.activity && 
+                               lastActivity.activity.includes('Automatically paused');
+            
+            if (!lastIsPause) {
+                console.log(`📝 Adding pause activity: "Automatically paused (${reason})"`);
+                this.dataManager.addActivity(`Automatically paused (${reason})`);
+                console.log(`📊 Activities count after adding pause: ${this.dataManager.activities.length}`);
+            } else {
+                console.log('⏩ Last activity is already a pause, skipping duplicate');
+                console.log(`📊 Current activities count: ${this.dataManager.activities.length}`);
+            }
+            
+            // Create emergency pre-shutdown backup with detailed state
+            const emergencyBackup = {
+                timestamp: new Date().toISOString(),
+                processId: process.pid,
+                reason: reason,
+                activitiesCount: this.dataManager.activities.length,
+                activities: this.dataManager.activities.map(a => a.toJSON()),
+                config: this.dataManager.config
+            };
+            
+            const emergencyFile = path.join(this.dataManager.dataDir, 'emergency_pre_shutdown.json');
+            const fs = require('fs-extra');
+            
+            console.log('🚨 Creating emergency pre-shutdown backup...');
+            await fs.writeJson(emergencyFile, emergencyBackup, { spaces: 2 });
+            
+            // Force immediate save with verification
+            console.log('💾 Force saving activities and config...');
+            this.dataManager.saveActivities();
+            this.dataManager.saveConfig();
+            
+            // Multiple file system sync attempts
+            for (let i = 0; i < 3; i++) {
+                console.log(`🔄 File sync attempt ${i + 1}/3...`);
+                
+                // Force file system sync (platform-specific)
+                try {
+                    const { spawn } = require('child_process');
+                    if (process.platform === 'darwin' || process.platform === 'linux') {
+                        // Force filesystem sync on Unix-like systems
+                        spawn('sync', { stdio: 'ignore' });
+                    }
+                } catch (error) {
+                    console.warn('Could not force filesystem sync:', error.message);
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
+                // Verify files were written correctly
+                const activitiesExist = await this.verifyFileIntegrity(this.dataManager.activitiesFile);
+                const configExists = await this.verifyFileIntegrity(this.dataManager.configFile);
+                
+                console.log(`🔍 File integrity check ${i + 1} - activities: ${activitiesExist}, config: ${configExists}`);
+                
+                if (activitiesExist && configExists) {
+                    console.log(`✅ File integrity verified on attempt ${i + 1}`);
+                    break;
+                }
+                
+                if (i === 2) {
+                    console.error('❌ All file integrity checks failed!');
+                }
+            }
+            
+            console.log('✅ Data persistence completed successfully');
+            if (this.logger) {
+                await this.logger.logSessionEvent('data_persistence_success', { reason });
+            }
+            
+        } catch (error) {
+            console.error('❌ Error during data persistence:', error.message);
+            if (this.logger) {
+                await this.logger.logError('session', error, { action: 'data_persistence', reason });
+            }
+        }
+    }
+    
+    // Verify file exists and has content
+    async verifyFileIntegrity(filePath) {
+        try {
+            const fs = require('fs-extra');
+            if (await fs.pathExists(filePath)) {
+                const stats = await fs.stat(filePath);
+                return stats.size > 0; // File exists and has content
+            }
+            return false;
+        } catch (error) {
+            console.warn(`File integrity check failed for ${filePath}:`, error.message);
+            return false;
         }
     }
 }

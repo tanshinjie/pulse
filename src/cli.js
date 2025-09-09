@@ -200,8 +200,16 @@ program
     .command('stop')
     .description('Stop the pulse daemon')
     .option('-f, --force', 'Force stop the daemon')
+    .option('--cleanup', 'Clean up all duplicate daemon processes')
     .action(async (options) => {
         try {
+            if (options.cleanup) {
+                console.log(chalk.blue('🧹 Cleaning up all daemon processes...'));
+                await daemonManager.cleanupStaleDaemons();
+                console.log(chalk.green('✅ Cleanup completed'));
+                return;
+            }
+            
             if (options.force) {
                 const stopped = await daemonManager.forceStop();
                 if (stopped) {
