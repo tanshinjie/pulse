@@ -42,24 +42,7 @@ class DataManager {
         fs.ensureDirSync(this.dataDir);
         fs.ensureDirSync(this.backupDir);
         
-        // DEBUG: Log DataManager initialization
-        console.log(`🔧 DataManager initializing in process ${process.pid}`);
-        console.log(`📁 Data directory: ${this.dataDir}`);
-        console.log(`📄 Activities file: ${this.activitiesFile}`);
-        
-        // Check if files exist before loading
-        const activitiesExist = fs.existsSync(this.activitiesFile);
-        const configExists = fs.existsSync(this.configFile);
-        console.log(`📊 Files exist - activities: ${activitiesExist}, config: ${configExists}`);
-        
-        if (activitiesExist) {
-            try {
-                const fileStats = fs.statSync(this.activitiesFile);
-                console.log(`📈 Activities file size: ${fileStats.size} bytes, modified: ${fileStats.mtime}`);
-            } catch (error) {
-                console.warn('Could not read activities file stats:', error.message);
-            }
-        }
+        // Initialize data directory
         
         // Load data with integrity checks
         this.config = this.loadConfigWithIntegrityCheck();
@@ -68,11 +51,7 @@ class DataManager {
         // Check for emergency pre-shutdown backup and recover if needed
         this.checkEmergencyRecovery();
         
-        console.log(`✅ DataManager loaded ${this.activities.length} activities`);
-        if (this.activities.length > 0) {
-            const lastActivity = this.activities[this.activities.length - 1];
-            console.log(`🔍 Last activity: "${lastActivity.activity}" at ${lastActivity.timestamp}`);
-        }
+        // Data loaded successfully
     }
 
     loadConfig() {
@@ -131,21 +110,15 @@ class DataManager {
     }
 
     saveActivities() {
-        console.log(`💾 Saving ${this.activities.length} activities to disk in process ${process.pid}`);
-        
         try {
             // Create backup before saving
             this.createBackup(this.activitiesFile, 'activities');
             
             const data = this.activities.map(activity => activity.toJSON());
-            console.log(`📝 Writing activities data (${data.length} entries) to ${this.activitiesFile}`);
-            
             fs.writeJsonSync(this.activitiesFile, data, { spaces: 2 });
             
             // Verify the write was successful
             this.verifyFileWrite(this.activitiesFile, data);
-            
-            console.log(`✅ Activities saved successfully (${data.length} entries)`);
         } catch (error) {
             console.error('❌ Error saving activities:', error.message);
             // Attempt to restore from backup
@@ -327,33 +300,9 @@ class DataManager {
                 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
                 const backupPath = path.join(this.backupDir, `${type}_${timestamp}.json`);
                 fs.copySync(filePath, backupPath);
-                
-                // Keep only the last 5 backups for each type
-                this.cleanupOldBackups(type);
             }
         } catch (error) {
             console.warn(`Failed to create backup for ${type}:`, error.message);
-        }
-    }
-    
-    cleanupOldBackups(type) {
-        try {
-            const backupFiles = fs.readdirSync(this.backupDir)
-                .filter(file => file.startsWith(`${type}_`) && file.endsWith('.json'))
-                .sort()
-                .reverse();
-                
-            // Keep only the 5 most recent backups
-            const filesToDelete = backupFiles.slice(5);
-            filesToDelete.forEach(file => {
-                try {
-                    fs.removeSync(path.join(this.backupDir, file));
-                } catch (error) {
-                    console.warn(`Failed to delete old backup ${file}:`, error.message);
-                }
-            });
-        } catch (error) {
-            console.warn(`Failed to cleanup old backups for ${type}:`, error.message);
         }
     }
     

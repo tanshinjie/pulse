@@ -116,7 +116,6 @@ class DaemonManager extends EventEmitter {
 
         try {
             console.log(`🚀 [Process ${process.pid}] Daemon starting up...`);
-            console.log(`📊 Loaded ${this.dataManager.activities.length} activities from disk`);
             
             // Check if this is an auto-restart after unlock by looking for recent pause activity
             const recentActivities = this.dataManager.getRecentActivities(5);
@@ -132,7 +131,6 @@ class DaemonManager extends EventEmitter {
             if (hasRecentLockPause && !lastIsResume) {
                 console.log('🔓 Detected auto-restart after screen unlock, adding resume activity');
                 this.dataManager.addActivity('Automatically resumed (screen unlocked)');
-                console.log(`📊 Activities count after adding resume: ${this.dataManager.activities.length}`);
             } else if (lastIsResume) {
                 console.log('⏩ Last activity is already a resume, skipping duplicate');
             }

@@ -404,162 +404,31 @@ class SessionManager extends EventEmitter {
             });
         }
         
-        // On macOS, we can check the screensaver state using multiple methods
+        // On macOS, we can check the screensaver state
         this.lockPollInterval = setInterval(async () => {
             try {
-                // Log each polling cycle to verify it's running
-                if (this.logger) {
-                    await this.logger.debug('session', 'macOS lock monitoring polling cycle started');
-                }
                 await this.checkMacOSLockState();
-                if (this.logger) {
-                    await this.logger.debug('session', 'macOS lock monitoring polling cycle completed');
-                }
             } catch (error) {
                 console.warn('Lock state check error:', error.message);
                 if (this.logger) await this.logger.warn('session', 'macOS lock check failed', { error: error.message });
             }
         }, this.config.checkInterval * 1000);
         
-        // Log that the interval has been set up
-        if (this.logger) {
-            await this.logger.logSessionEvent('macos_lock_polling_interval_set', { 
-                intervalMs: this.config.checkInterval * 1000,
-                intervalSeconds: this.config.checkInterval 
-            });
-        }
-        
         // Initial check
-        console.log('🔍 Performing initial lock state check...');
-        if (this.logger) {
-            await this.logger.debug('session', 'Performing initial macOS lock state check');
-        }
         await this.checkMacOSLockState();
-        
-        // Log that monitoring is now active
-        if (this.logger) {
-            await this.logger.logSessionEvent('macos_lock_monitoring_active', { 
-                status: 'running',
-                nextCheckIn: this.config.checkInterval 
-            });
-        }
     }
     
     async checkMacOSLockState() {
         return new Promise((resolve) => {
-            console.log('🔍 Checking macOS lock state...');
-            
-            // Simplified and more reliable lock detection
-            // Use a combination of methods to determine lock state more accurately
-            
-            let lockCheckPromises = [];
-            let lockCheckResults = [];
-            
-            // Method 1: Check if screensaver is running
-            const screensaverCheck = new Promise((resolveCheck) => {
-                exec('pgrep -x ScreenSaverEngine', (error, stdout) => {
-                    const screensaverActive = !error && stdout.trim().length > 0;
-                    console.log(`🔍 ScreenSaverEngine check: ${screensaverActive ? 'active' : 'inactive'}`);
-                    resolveCheck({ method: 'screensaver', locked: screensaverActive, confidence: screensaverActive ? 0.9 : 0.1 });
-                });
-            });
-            
-            // Method 2: Check display brightness (more reliable than power state)
-            const brightnessCheck = new Promise((resolveCheck) => {
-                exec('brightness -l', (error, stdout) => {
-                    if (error) {
-                        // If brightness command fails, try system_profiler
-                        exec('system_profiler SPDisplaysDataType | grep Resolution', (error2, stdout2) => {
-                            const displaysDetected = !error2 && stdout2.trim().length > 0;
-                            console.log(`🔍 Display detection: ${displaysDetected ? 'displays active' : 'no active displays'}`);
-                            resolveCheck({ method: 'display', locked: !displaysDetected, confidence: 0.3 });
-                        });
-                    } else {
-                        // If we can read brightness, screen is likely unlocked
-                        const hasOutput = stdout.trim().length > 0;
-                        console.log(`🔍 Brightness check: ${hasOutput ? 'readable' : 'not readable'}`);
-                        resolveCheck({ method: 'brightness', locked: !hasOutput, confidence: hasOutput ? 0.7 : 0.5 });
-                    }
-                });
-            });
-            
-            // Method 3: Check if we can access UI elements via AppleScript
-            const uiAccessCheck = new Promise((resolveCheck) => {
-                const quickUIScript = `
-                tell application "System Events"
-                    try
-                        -- Try to get desktop items (only works when unlocked)
-                        set desktopItems to count of desktop 1
-                        return true
-                    on error
-                        return false
-                    end try
-                end tell`;
-                
-                exec(`osascript -e '${quickUIScript}'`, (error, stdout) => {
-                    const canAccessUI = !error && stdout.trim() === 'true';
-                    console.log(`🔍 UI access check: ${canAccessUI ? 'accessible' : 'blocked'}`);
-                    resolveCheck({ method: 'ui_access', locked: !canAccessUI, confidence: canAccessUI ? 0.8 : 0.6 });
-                });
-            });
-            
-            lockCheckPromises.push(screensaverCheck, brightnessCheck, uiAccessCheck);
-            
-            // Wait for all checks to complete (with timeout)
-            const checkTimeout = setTimeout(() => {
-                console.log('⏰ Lock state check timeout, using available results');
-                this.evaluateLockState(lockCheckResults, resolve);
-            }, 5000); // 5 second timeout
-            
-            Promise.allSettled(lockCheckPromises).then((results) => {
-                clearTimeout(checkTimeout);
-                lockCheckResults = results.filter(r => r.status === 'fulfilled').map(r => r.value);
-                this.evaluateLockState(lockCheckResults, resolve);
+            // Simplified lock detection using the most reliable method
+            exec('pgrep -x ScreenSaverEngine', (error, stdout) => {
+                const isLocked = !error && stdout.trim().length > 0;
+                this.handleLockStateChange(isLocked);
+                resolve();
             });
         });
     }
     
-    // Evaluate lock state based on multiple check results
-    evaluateLockState(results, resolve) {
-        console.log(`🔍 Evaluating lock state from ${results.length} checks:`, results);
-        
-        if (results.length === 0) {
-            console.log('🤷 No lock check results available, assuming unlocked');
-            this.handleLockStateChange(false);
-            resolve();
-            return;
-        }
-        
-        // Calculate weighted score
-        let lockedScore = 0;
-        let totalConfidence = 0;
-        
-        results.forEach(result => {
-            const weight = result.locked ? result.confidence : (1 - result.confidence);
-            lockedScore += weight;
-            totalConfidence += result.confidence;
-        });
-        
-        const averageScore = lockedScore / results.length;
-        const isLocked = averageScore > 0.5;
-        
-        console.log(`🔍 Lock state evaluation: score=${averageScore.toFixed(2)}, locked=${isLocked}`);
-        
-        // Log high-confidence results
-        const highConfidenceResults = results.filter(r => r.confidence > 0.7);
-        if (highConfidenceResults.length > 0) {
-            const definitiveResult = highConfidenceResults.find(r => r.locked);
-            if (definitiveResult) {
-                console.log(`🔒 High confidence lock detection via ${definitiveResult.method}`);
-                this.handleLockStateChange(true);
-                resolve();
-                return;
-            }
-        }
-        
-        this.handleLockStateChange(isLocked);
-        resolve();
-    }
     
     async startLinuxLockMonitoring() {
         // For Linux, we can use dbus-monitor to watch for lock/unlock signals
@@ -656,21 +525,15 @@ class SessionManager extends EventEmitter {
     }
     
     handleLockStateChange(isLocked) {
-        console.log(`🔍 handleLockStateChange called with isLocked=${isLocked}, previousState=${this.lastLockState}`);
-        
         if (this.lastLockState === isLocked) {
-            console.log('⏭️ No state change detected, skipping');
             return; // No change
         }
         
         const previousState = this.lastLockState;
         this.lastLockState = isLocked;
         
-        console.log(`🔄 Lock state changed: ${previousState === null ? 'initial' : previousState ? 'locked' : 'unlocked'} -> ${isLocked ? 'locked' : 'unlocked'}`);
-        
         if (previousState === null) {
             // Initial state
-            console.log(`🔰 Initial lock state: ${isLocked ? 'locked' : 'unlocked'}`);
             if (this.logger) {
                 this.logger.logSessionEvent('initial_lock_state_detected', { 
                     isLocked, 

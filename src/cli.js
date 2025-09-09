@@ -25,7 +25,7 @@ const sessionManager = new SessionManager(daemonManager, dataManager, logger);
 program
     .name('pulse')
     .description('Pulse - Mindful productivity tracking with rhythmic check-ins')
-    .version('1.0.0');
+    .version('1.0.1');
 
 // Log command
 program
@@ -365,7 +365,7 @@ program
     .command('report')
     .description('Generate time tracking reports')
     .option('-p, --period <period>', 'Report period (today, week, month)', 'today')
-    .option('-e, --export <format>', 'Export format (csv, json)')
+    .option('-e, --export <format>', 'Export format (csv, json, ical)')
     .action(async (options) => {
         try {
             // Determine date range
@@ -429,7 +429,7 @@ program
                 });
             }
 
-            console.log(chalk.gray('\n💡 Use --export csv or --export json to export data'));
+            console.log(chalk.gray('\n💡 Use --export csv, --export json, or --export ical to export data'));
         } catch (error) {
             console.error(chalk.red('❌ Error generating report:'), error.message);
         }
@@ -978,8 +978,11 @@ async function exportReport(summary, period, format) {
         } else if (format === 'csv') {
             const csvContent = generateCSV(summary);
             await fs.writeFile(filename, csvContent);
+        } else if (format === 'ical') {
+            const icalContent = generateICAL(summary, period);
+            await fs.writeFile(filename, icalContent);
         } else {
-            console.error(chalk.red('❌ Invalid export format. Use: csv or json'));
+            console.error(chalk.red('❌ Invalid export format. Use: csv, json, or ical'));
             return;
         }
 
@@ -1000,6 +1003,49 @@ function generateCSV(summary) {
     });
 
     return lines.join('\n');
+}
+
+function generateICAL(summary, period) {
+    const now = new Date();
+    const dtStamp = formatICALDateTime(now);
+    const uid = `pulse-report-${period}-${now.getTime()}`;
+    
+    let icalContent = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        'PRODID:-//Pulse Tracker//Activity Report//EN',
+        'CALSCALE:GREGORIAN',
+        'METHOD:PUBLISH'
+    ];
+    
+    summary.activities.forEach((activity, index) => {
+        if (activity.duration > 0) {
+            const startTime = activity.timestamp;
+            const endTime = new Date(startTime.getTime() + activity.duration * 60 * 1000);
+            
+            // Clean activity text for iCal format
+            const cleanActivity = activity.activity.replace(/[,;\\]/g, '\\$&').replace(/\n/g, '\\n');
+            
+            icalContent.push(
+                'BEGIN:VEVENT',
+                `UID:pulse-activity-${activity.timestamp.getTime()}-${index}@pulse-tracker`,
+                `DTSTART:${formatICALDateTime(startTime)}`,
+                `DTEND:${formatICALDateTime(endTime)}`,
+                `DTSTAMP:${dtStamp}`,
+                `SUMMARY:${cleanActivity}`,
+                `DESCRIPTION:Duration: ${activity.duration} minutes`,
+                'CATEGORIES:Work,Productivity',
+                'END:VEVENT'
+            );
+        }
+    });
+    
+    icalContent.push('END:VCALENDAR');
+    return icalContent.join('\r\n');
+}
+
+function formatICALDateTime(date) {
+    return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
 
 function parseTimestamp(options) {
