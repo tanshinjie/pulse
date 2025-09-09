@@ -424,17 +424,6 @@ npm test
 - **Storage**: JSON files, typically <1MB for months of data
 - **Startup Time**: <100ms for most commands
 
-## Comparison with Python Version
-
-| Feature | Node.js Version | Python Version |
-|---------|----------------|----------------|
-| Installation | `npm install -g .` | `pip install` + setup |
-| Performance | Faster startup | Slower startup |
-| Memory Usage | Lower | Higher |
-| Notifications | Better cross-platform | Platform dependent |
-| Dependencies | Fewer conflicts | More complex |
-| Distribution | Single package | Multiple files |
-
 ## License
 
 MIT License - feel free to modify and distribute.
