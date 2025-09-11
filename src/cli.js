@@ -1018,8 +1018,8 @@ function generateICAL(summary, period) {
     
     summary.activities.forEach((activity, index) => {
         if (activity.duration > 0) {
-            const startTime = activity.timestamp;
-            const endTime = new Date(startTime.getTime() + activity.duration * 60 * 1000);
+            const endTime = activity.timestamp;
+            const startTime = new Date(endTime.getTime() - activity.duration * 60 * 1000);
             
             // Clean activity text for iCal format
             const cleanActivity = activity.activity.replace(/[,;\\]/g, '\\$&').replace(/\n/g, '\\n');
