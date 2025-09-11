@@ -201,7 +201,7 @@ class NotificationManager {
 
     // Send a check-in notification with context
     async sendCheckInNotification(interval, lastActivity = null) {
-        const title = 'Productivity Check-in';
+        const title = 'Check-in';
         let message = `What have you been working on for the past ${interval} minutes?`;
         
         if (lastActivity) {

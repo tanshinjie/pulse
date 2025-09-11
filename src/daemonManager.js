@@ -449,7 +449,7 @@ class DaemonManager extends EventEmitter {
             console.error('Error sending check-in notification:', error.message);
             // Use fallback notification
             this.notificationManager.fallbackNotification(
-                'Productivity Check-in',
+                'Check-in',
                 `What have you been working on for the past ${interval} minutes?`
             );
         }

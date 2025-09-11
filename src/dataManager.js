@@ -129,12 +129,33 @@ class DataManager {
     addActivity(activity, timestamp = null) {
         const newActivity = new Activity(activity, timestamp);
 
+        // Calculate duration for the new activity based on previous record
+        let previousTime = null;
+        
+        if (this.activities.length > 0) {
+            // Find the most recent activity before this timestamp
+            const previousActivity = this.activities
+                .filter(a => a.timestamp < newActivity.timestamp)
+                .sort((a, b) => b.timestamp - a.timestamp)[0];
+            
+            if (previousActivity) {
+                previousTime = previousActivity.timestamp;
+            }
+        }
+        
+        // If no previous record, use today 00:00 as the start time
+        if (!previousTime) {
+            const today = new Date(newActivity.timestamp);
+            today.setHours(0, 0, 0, 0);
+            previousTime = today;
+        }
+        
+        const duration = (newActivity.timestamp - previousTime) / (1000 * 60); // minutes
+        newActivity.durationMinutes = Math.max(0, Math.floor(duration));
+
         // Insert activity in chronological order
         const insertIndex = this.findInsertIndex(newActivity.timestamp);
         this.activities.splice(insertIndex, 0, newActivity);
-
-        // Recalculate durations for affected activities
-        this.recalculateDurations(insertIndex);
 
         this.saveActivities();
         return newActivity;
@@ -163,14 +184,17 @@ class DataManager {
         
         for (let i = startIndex; i < this.activities.length; i++) {
             const current = this.activities[i];
-            const next = this.activities[i + 1];
+            const previous = this.activities[i - 1];
             
-            if (next) {
-                // Calculate duration until next activity
-                const duration = (next.timestamp - current.timestamp) / (1000 * 60); // minutes
-                current.durationMinutes = Math.max(0, Math.floor(duration));
-            } else {
-                // Last activity has 0 duration until next activity is logged
+            if (previous) {
+                // Calculate duration from previous activity to current activity
+                // This represents how long was spent on the previous task
+                const duration = (current.timestamp - previous.timestamp) / (1000 * 60); // minutes
+                previous.durationMinutes = Math.max(0, Math.floor(duration));
+            }
+            
+            // The current (most recent) activity always has 0 duration until next activity is logged
+            if (i === this.activities.length - 1) {
                 current.durationMinutes = 0;
             }
         }
@@ -212,6 +236,33 @@ class DataManager {
             activities: activities,
             activityCount: recentActivities.length,
             periodDays: days
+        };
+    }
+
+    getTodaysSummary() {
+        // Get activities from 00:00 today onwards
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const todaysActivities = this.activities.filter(a => a.timestamp >= today);
+
+        let totalTime = 0;
+        const activities = [];
+
+        for (const activity of todaysActivities) {
+            const duration = activity.durationMinutes;
+            totalTime += duration;
+            activities.push({
+                activity: activity.activity,
+                duration: duration,
+                timestamp: activity.timestamp
+            });
+        }
+
+        return {
+            totalTimeMinutes: totalTime,
+            activities: activities,
+            activityCount: todaysActivities.length,
+            periodDays: 'today'
         };
     }
 

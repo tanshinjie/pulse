@@ -368,27 +368,25 @@ program
     .option('-e, --export <format>', 'Export format (csv, json, ical)')
     .action(async (options) => {
         try {
-            // Determine date range
-            let days, title;
+            // Determine date range and get summary
+            let summary, title;
             switch (options.period) {
                 case 'today':
-                    days = 1;
+                    summary = dataManager.getTodaysSummary();
                     title = "Today's Report";
                     break;
                 case 'week':
-                    days = 7;
+                    summary = dataManager.getTimeSummary(7);
                     title = "Weekly Report";
                     break;
                 case 'month':
-                    days = 30;
+                    summary = dataManager.getTimeSummary(30);
                     title = "Monthly Report";
                     break;
                 default:
                     console.error(chalk.red('❌ Invalid period. Use: today, week, or month'));
                     return;
             }
-
-            const summary = dataManager.getTimeSummary(days);
 
             if (options.export) {
                 await exportReport(summary, options.period, options.export);
