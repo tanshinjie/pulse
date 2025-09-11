@@ -143,11 +143,11 @@ class DataManager {
             }
         }
         
-        // If no previous record, use today 00:00 as the start time
+        // If no previous record, use the start of the same day as the new activity
         if (!previousTime) {
-            const today = new Date(newActivity.timestamp);
-            today.setHours(0, 0, 0, 0);
-            previousTime = today;
+            const dayStart = new Date(newActivity.timestamp);
+            dayStart.setHours(0, 0, 0, 0);
+            previousTime = dayStart;
         }
         
         const duration = (newActivity.timestamp - previousTime) / (1000 * 60); // minutes
