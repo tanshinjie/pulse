@@ -8,6 +8,11 @@ class NotificationManager {
     constructor() {
         this.platform = os.platform();
         this.appName = 'Pulse';
+        this.logger = null;
+    }
+    
+    setLogger(logger) {
+        this.logger = logger;
     }
 
     async sendNotification(title, message, options = {}) {

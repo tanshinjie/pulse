@@ -20,7 +20,7 @@ const program = new Command();
 const dataManager = new DataManager();
 const logger = new Logger(dataManager);
 const notificationManager = new NotificationManager();
-const daemonManager = new DaemonManager(dataManager, notificationManager);
+const daemonManager = new DaemonManager(dataManager, notificationManager, logger);
 const sessionManager = new SessionManager(daemonManager, dataManager, logger);
 
 program
@@ -101,6 +101,14 @@ program
 
             // Close terminal if --close flag is used (useful for notification clicks)
             if (options.close) {
+                // Log that user clicked on notification
+                await logger.logNotification('clicked', {
+                    activity: activityText,
+                    timestamp: newActivity.timestampEnd.toISOString(),
+                    duration: newActivity.durationMinutes,
+                    id: newActivity.id
+                });
+                
                 console.log(chalk.gray('\n👋 Closing terminal...'));
                 setTimeout(() => {
                     if (os.platform() === 'darwin') {
@@ -115,6 +123,12 @@ program
             
             // Still close terminal on error if --close flag is used
             if (options.close) {
+                // Log that user clicked on notification but there was an error
+                await logger.logNotification('clicked_with_error', {
+                    error: error.message,
+                    activity: activity || 'unknown'
+                });
+                
                 setTimeout(() => {
                     if (os.platform() === 'darwin') {
                         require('child_process').exec('osascript -e "tell application \\"Terminal\\" to close front window"');

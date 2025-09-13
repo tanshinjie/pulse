@@ -6,10 +6,11 @@ const { spawn } = require('child_process');
 const EventEmitter = require('events');
 
 class DaemonManager extends EventEmitter {
-    constructor(dataManager, notificationManager) {
+    constructor(dataManager, notificationManager, logger = null) {
         super();
         this.dataManager = dataManager;
         this.notificationManager = notificationManager;
+        this.logger = logger;
         this.job = null;
         this.isRunning = false;
         
@@ -173,6 +174,9 @@ class DaemonManager extends EventEmitter {
                 console.warn('Could not setup notification handlers:', error.message);
                 // Continue anyway - not critical
             }
+            
+            // Set logger for notification manager
+            this.notificationManager.setLogger(this.logger);
             
             // Start session monitoring if lock/unlock features are enabled
             // We need to import SessionManager here since this runs in the daemon process
@@ -443,10 +447,41 @@ class DaemonManager extends EventEmitter {
         const recentActivities = this.dataManager.getRecentActivities(2);
         const lastActivity = recentActivities.length > 0 ? recentActivities[recentActivities.length - 1] : null;
 
+        // Log that the notification interval has triggered
+        if (this.logger) {
+            await this.logger.logNotification('interval_triggered', {
+                interval: interval,
+                lastActivity: lastActivity ? {
+                    id: lastActivity.id,
+                    activity: lastActivity.activity,
+                    timestamp: lastActivity.timestampEnd.toISOString()
+                } : null
+            });
+        }
+
         try {
-            await this.notificationManager.sendCheckInNotification(interval, lastActivity);
+            const result = await this.notificationManager.sendCheckInNotification(interval, lastActivity);
+            
+            // Log successful notification send
+            if (this.logger) {
+                await this.logger.logNotification('sent', {
+                    interval: interval,
+                    method: result.method || 'unknown',
+                    success: result.success,
+                    usedFallback: result.usedFallback || false
+                });
+            }
         } catch (error) {
             console.error('Error sending check-in notification:', error.message);
+            
+            // Log notification send failure
+            if (this.logger) {
+                await this.logger.logNotification('send_failed', {
+                    interval: interval,
+                    error: error.message
+                });
+            }
+            
             // Use fallback notification
             this.notificationManager.fallbackNotification(
                 'Check-in',

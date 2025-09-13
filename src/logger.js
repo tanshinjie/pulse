@@ -128,7 +128,7 @@ class Logger {
     }
 
     async logNotification(action, details = null) {
-        await this.debug('notification', `Notification ${action}`, details);
+        await this.info('notification', `Notification ${action}`, details);
     }
 
     async logConfig(action, key, value, oldValue = null) {
