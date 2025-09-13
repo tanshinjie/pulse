@@ -1070,43 +1070,14 @@ function displayLogEntry(entry, raw = false) {
 // Session management command
 program
     .command('session')
-    .description('Manage automatic session start/stop')
-    .option('--start', 'Start session monitoring')
-    .option('--stop', 'Stop session monitoring')
-    .option('--status', 'Show session monitoring status')
-    .option('--enable-auto-start', 'Enable auto-start on login')
-    .option('--disable-auto-start', 'Disable auto-start on login')
-    .option('--enable-auto-stop', 'Enable auto-stop on logout')
-    .option('--disable-auto-stop', 'Disable auto-stop on logout')
+    .description('Manage automatic session start/stop and view status')
     .option('--enable-auto-start-unlock', 'Enable auto-start on screen unlock')
     .option('--disable-auto-start-unlock', 'Disable auto-start on screen unlock')
     .option('--enable-auto-stop-lock', 'Enable auto-stop on screen lock')
     .option('--disable-auto-stop-lock', 'Disable auto-stop on screen lock')
     .action(async (options) => {
         try {
-            if (options.start) {
-                console.log(chalk.blue('🔄 Starting session monitoring...'));
-                await logger.info('session', 'Session monitoring start requested via CLI');
-                await sessionManager.startSessionMonitoring();
-                console.log(chalk.green('✅ Session monitoring started'));
-            } else if (options.stop) {
-                console.log(chalk.blue('🔄 Stopping session monitoring...'));
-                await logger.info('session', 'Session monitoring stop requested via CLI');
-                await sessionManager.stopSessionMonitoring();
-                console.log(chalk.green('✅ Session monitoring stopped'));
-            } else if (options.enableAutoStart) {
-                sessionManager.updateConfig('autoStartOnLogin', true);
-                console.log(chalk.green('✅ Auto-start on login enabled'));
-            } else if (options.disableAutoStart) {
-                sessionManager.updateConfig('autoStartOnLogin', false);
-                console.log(chalk.green('✅ Auto-start on login disabled'));
-            } else if (options.enableAutoStop) {
-                sessionManager.updateConfig('autoStopOnLogout', true);
-                console.log(chalk.green('✅ Auto-stop on logout enabled'));
-            } else if (options.disableAutoStop) {
-                sessionManager.updateConfig('autoStopOnLogout', false);
-                console.log(chalk.green('✅ Auto-stop on logout disabled'));
-            } else if (options.enableAutoStartUnlock) {
+            if (options.enableAutoStartUnlock) {
                 sessionManager.updateConfig('autoStartOnUnlock', true);
                 console.log(chalk.green('✅ Auto-start on screen unlock enabled'));
                 console.log(chalk.gray('💡 Note: You need to start the daemon for this to take effect'));
@@ -1141,19 +1112,11 @@ program
                 
                 console.log(chalk.gray('Current session:'), sessionState === null ? 'Unknown' : (sessionState ? 'Active' : 'Inactive'));
                 console.log(chalk.gray('Current screen state:'), lockState === null ? 'Unknown' : (lockState ? 'Locked' : 'Unlocked'));
-                console.log(chalk.gray('Auto-start on login:'), config.autoStart ? '✅' : '❌');
-                console.log(chalk.gray('Auto-stop on logout:'), config.autoStop ? '✅' : '❌');
                 console.log(chalk.gray('Auto-start on unlock:'), config.autoStartOnUnlock ? '✅' : '❌');
                 console.log(chalk.gray('Auto-stop on lock:'), config.autoStopOnLock ? '✅' : '❌');
                 console.log(chalk.gray('Check interval:'), `${config.checkInterval}s`);
                 
                 console.log(chalk.blue('\n💡 Usage:'));
-                console.log('  pulse session --start                     Start session monitoring');
-                console.log('  pulse session --stop                      Stop session monitoring');
-                console.log('  pulse session --enable-auto-start         Enable auto-start on login');
-                console.log('  pulse session --disable-auto-start        Disable auto-start on login');
-                console.log('  pulse session --enable-auto-stop          Enable auto-stop on logout');
-                console.log('  pulse session --disable-auto-stop         Disable auto-stop on logout');
                 console.log('  pulse session --enable-auto-start-unlock  Enable auto-start on screen unlock');
                 console.log('  pulse session --disable-auto-start-unlock Disable auto-start on screen unlock');
                 console.log('  pulse session --enable-auto-stop-lock     Enable auto-stop on screen lock');
@@ -1163,6 +1126,10 @@ program
                 console.log('  pulse test-lock --check                   Check current lock state');
                 console.log('  pulse test-lock --lock                    Simulate screen lock');
                 console.log('  pulse test-lock --unlock                  Simulate screen unlock');
+                
+                console.log(chalk.blue('\n💡 Alternative Configuration:'));
+                console.log('  pulse config autoStartOnUnlock true       Enable auto-start on unlock');
+                console.log('  pulse config autoStopOnLock true          Enable auto-stop on lock');
             }
         } catch (error) {
             console.error(chalk.red('❌ Session management error:'), error.message);
