@@ -17,6 +17,10 @@ A terminal-based productivity tracking application built with Node.js that sends
 - ⚡ **Fast & Lightweight**: Built with Node.js for optimal performance
 - 🖱️ **Click-to-Log**: Click notifications to quickly log activities
 
+## Why I Built This
+
+I started this app to keep a clearer record of how I spend time on my computer. I’ve noticed that what I plan to do rarely matches what I actually end up doing. That’s why I log backwards—it feels more honest. Instead of forcing rigid schedules, I’d rather see the truth of my day and learn from it. The point isn’t perfect productivity, but spending time with more intention.
+
 ## Installation
 
 ### Prerequisites
