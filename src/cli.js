@@ -37,6 +37,7 @@ program
     .option('-t, --time <time>', 'Log activity at specific time (HH:MM or YYYY-MM-DD HH:MM)')
     .option('-d, --date <date>', 'Log activity on specific date (YYYY-MM-DD)')
     .option('--ago <duration>', 'Log activity X minutes/hours ago (e.g., "30m", "2h")')
+    .option('--duration <duration>', 'Specify how long the activity lasted (e.g., "30m", "2h")')
     .action(async (activity, options) => {
         try {
             let activityText = activity;
@@ -60,12 +61,18 @@ program
                 timestamp = parseTimestamp(options);
             }
 
+            // Parse duration from options
+            let durationMinutes = null;
+            if (options.duration) {
+                durationMinutes = parseDuration(options.duration);
+            }
+
             // Add the activity
-            const newActivity = dataManager.addActivity(activityText, timestamp);
+            const newActivity = dataManager.addActivity(activityText, timestamp, durationMinutes);
             
             // Log the activity
             await logger.logActivity('logged', activityText, {
-                timestamp: newActivity.timestamp.toISOString(),
+                timestamp: newActivity.timestampEnd.toISOString(),
                 duration: newActivity.durationMinutes,
                 id: newActivity.id,
                 ...(timestamp && { customTime: true })
@@ -74,9 +81,9 @@ program
             console.log(chalk.green('✅ Logged:'), activityText);
             
             if (timestamp && timestamp < new Date(Date.now() - 60000)) { // More than 1 minute ago
-                console.log(chalk.blue('⏰ Logged at:'), newActivity.timestamp.toLocaleString());
+                console.log(chalk.blue('⏰ Logged at:'), newActivity.timestampEnd.toLocaleString());
             } else {
-                console.log(chalk.gray('⏰ Time:'), newActivity.timestamp.toLocaleTimeString());
+                console.log(chalk.gray('⏰ Time:'), newActivity.timestampEnd.toLocaleTimeString());
             }
 
             // Show duration information for affected activities
@@ -190,7 +197,7 @@ program
                     // Log the deletion
                     await logger.logActivity('deleted', selectedActivity.activity, {
                         id: selectedActivity.id,
-                        timestamp: selectedActivity.timestamp.toISOString(),
+                        timestamp: selectedActivity.timestampEnd.toISOString(),
                         duration: selectedActivity.durationMinutes
                     });
 
@@ -333,7 +340,7 @@ program
             // Log the update
             await logger.logActivity('edited', updatedActivity.activity, {
                 id: updatedActivity.id,
-                timestamp: updatedActivity.timestamp.toISOString(),
+                timestamp: updatedActivity.timestampEnd.toISOString(),
                 duration: updatedActivity.durationMinutes,
                 changes: Object.keys(updates)
             });
@@ -1273,7 +1280,7 @@ function generateCSV(summary) {
     summary.activities.forEach(activity => {
         const timeMinutes = activity.duration;
         const timeHours = (timeMinutes / 60).toFixed(1);
-        const timestamp = activity.timestamp.toISOString();
+        const timestamp = activity.timestampEnd.toISOString();
         lines.push(`"${activity.activity}",${timeMinutes},${timeHours},${timestamp}`);
     });
 
@@ -1379,6 +1386,17 @@ function parseTimestamp(options) {
     }
     
     return null;
+}
+
+function parseDuration(durationStr) {
+    // Parse duration using ms library (e.g., "30m", "2h", "1h 30m")
+    const durationMs = ms(durationStr);
+    if (durationMs === undefined) {
+        throw new Error('Invalid duration format. Use formats like "30m", "2h", "1h 30m"');
+    }
+    
+    // Convert to minutes
+    return Math.floor(durationMs / (1000 * 60));
 }
 
 module.exports = program;

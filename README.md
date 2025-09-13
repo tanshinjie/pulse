@@ -143,6 +143,12 @@ pulse log
 # Quick logging with message
 pulse log "Working on feature X"
 
+# Log with specific duration (system calculates start time)
+pulse log "Deep work session" --duration "2h 30m"
+
+# Log with specific time and duration
+pulse log "Client call" --time "15:00" --duration "45m"
+
 # Close terminal after logging (useful from notifications)
 pulse log --close
 
@@ -247,16 +253,22 @@ All data is stored locally in `~/.pulse_track_data/`:
 
 ### Data Format
 
-Activities are stored as JSON objects:
+Activities are stored as JSON objects with precise start and end timestamps:
 
 ```json
 {
   "id": "uuid-string",
-  "timestamp": "2025-01-15T10:30:00.000Z",
-  "activity": "Working on documentation",
-  "durationMinutes": 45
+  "timestampStart": "2025-01-15T10:00:00.000Z",
+  "timestampEnd": "2025-01-15T10:45:00.000Z",
+  "activity": "Working on documentation"
 }
 ```
+
+**Key improvements:**
+- **Precise timestamps**: Both start and end times are stored
+- **Flexible duration**: Users can specify duration, system calculates start time
+- **Better analytics**: Can analyze time patterns, gaps, and overlaps
+- **Clean data structure**: No redundant fields, duration is calculated on-demand
 
 ## Advanced Features
 

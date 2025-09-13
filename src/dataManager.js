@@ -4,29 +4,47 @@ const os = require('os');
 const { v4: uuidv4 } = require('uuid');
 
 class Activity {
-    constructor(activity, timestamp = null, id = null) {
+    constructor(activity, timestampEnd = null, durationMinutes = null, id = null) {
         this.id = id || uuidv4();
-        this.timestamp = timestamp || new Date();
+        this.timestampEnd = timestampEnd || new Date();
         this.activity = activity;
-        this.durationMinutes = 0; // Will be calculated when next activity is logged
+        
+        // Calculate timestampStart based on duration
+        if (durationMinutes !== null && durationMinutes > 0) {
+            this.timestampStart = new Date(this.timestampEnd.getTime() - (durationMinutes * 60 * 1000));
+        } else {
+            // Default to 0 duration (current moment)
+            this.timestampStart = this.timestampEnd;
+        }
+    }
+
+    // Get duration in minutes
+    get durationMinutes() {
+        return Math.floor((this.timestampEnd - this.timestampStart) / (1000 * 60));
+    }
+
+    // Set duration by adjusting timestampStart
+    set durationMinutes(minutes) {
+        this.timestampStart = new Date(this.timestampEnd.getTime() - (minutes * 60 * 1000));
     }
 
     toJSON() {
         return {
             id: this.id,
-            timestamp: this.timestamp.toISOString(),
-            activity: this.activity,
-            durationMinutes: this.durationMinutes
+            timestampStart: this.timestampStart.toISOString(),
+            timestampEnd: this.timestampEnd.toISOString(),
+            activity: this.activity
         };
     }
 
     static fromJSON(data) {
         const activity = new Activity(
             data.activity,
-            new Date(data.timestamp),
+            new Date(data.timestampEnd),
+            null, // duration will be calculated
             data.id
         );
-        activity.durationMinutes = data.durationMinutes || 0;
+        activity.timestampStart = new Date(data.timestampStart);
         return activity;
     }
 }
@@ -126,49 +144,52 @@ class DataManager {
         }
     }
 
-    addActivity(activity, timestamp = null) {
-        const newActivity = new Activity(activity, timestamp);
+    addActivity(activity, timestampEnd = null, durationMinutes = null) {
+        const newActivity = new Activity(activity, timestampEnd, durationMinutes);
 
-        // Calculate duration for the new activity based on previous record
-        let previousTime = null;
-        
-        if (this.activities.length > 0) {
-            // Find the most recent activity before this timestamp
-            const previousActivity = this.activities
-                .filter(a => a.timestamp < newActivity.timestamp)
-                .sort((a, b) => b.timestamp - a.timestamp)[0];
+        // If no duration specified, calculate it based on previous activity
+        if (durationMinutes === null) {
+            let previousEndTime = null;
             
-            if (previousActivity) {
-                previousTime = previousActivity.timestamp;
+            if (this.activities.length > 0) {
+                // Find the most recent activity before this timestamp
+                const previousActivity = this.activities
+                    .filter(a => a.timestampEnd < newActivity.timestampEnd)
+                    .sort((a, b) => b.timestampEnd - a.timestampEnd)[0];
+                
+                if (previousActivity) {
+                    previousEndTime = previousActivity.timestampEnd;
+                }
             }
+            
+            // If no previous record, use the start of the same day as the new activity
+            if (!previousEndTime) {
+                const dayStart = new Date(newActivity.timestampEnd);
+                dayStart.setHours(0, 0, 0, 0);
+                previousEndTime = dayStart;
+            }
+            
+            // Calculate duration from previous activity end to current activity end
+            const duration = (newActivity.timestampEnd - previousEndTime) / (1000 * 60); // minutes
+            newActivity.durationMinutes = Math.max(0, Math.floor(duration));
         }
-        
-        // If no previous record, use the start of the same day as the new activity
-        if (!previousTime) {
-            const dayStart = new Date(newActivity.timestamp);
-            dayStart.setHours(0, 0, 0, 0);
-            previousTime = dayStart;
-        }
-        
-        const duration = (newActivity.timestamp - previousTime) / (1000 * 60); // minutes
-        newActivity.durationMinutes = Math.max(0, Math.floor(duration));
 
         // Insert activity in chronological order
-        const insertIndex = this.findInsertIndex(newActivity.timestamp);
+        const insertIndex = this.findInsertIndex(newActivity.timestampEnd);
         this.activities.splice(insertIndex, 0, newActivity);
 
         this.saveActivities();
         return newActivity;
     }
 
-    findInsertIndex(timestamp) {
+    findInsertIndex(timestampEnd) {
         // Find the correct position to insert the new activity chronologically
         let left = 0;
         let right = this.activities.length;
         
         while (left < right) {
             const mid = Math.floor((left + right) / 2);
-            if (this.activities[mid].timestamp <= timestamp) {
+            if (this.activities[mid].timestampEnd <= timestampEnd) {
                 left = mid + 1;
             } else {
                 right = mid;
@@ -187,9 +208,9 @@ class DataManager {
             const previous = this.activities[i - 1];
             
             if (previous) {
-                // Calculate duration from previous activity to current activity
+                // Calculate duration from previous activity end to current activity end
                 // This represents how long was spent on the previous task
-                const duration = (current.timestamp - previous.timestamp) / (1000 * 60); // minutes
+                const duration = (current.timestampEnd - previous.timestampEnd) / (1000 * 60); // minutes
                 previous.durationMinutes = Math.max(0, Math.floor(duration));
             }
             
@@ -214,18 +235,18 @@ class DataManager {
             activity.activity = updates.activity;
         }
 
-        // Update timestamp if provided
-        if (updates.timestamp !== undefined) {
-            const newTimestamp = new Date(updates.timestamp);
+        // Update timestampEnd if provided
+        if (updates.timestampEnd !== undefined) {
+            const newTimestampEnd = new Date(updates.timestampEnd);
             
             // Remove activity from current position
             this.activities.splice(activityIndex, 1);
             
-            // Update timestamp
-            activity.timestamp = newTimestamp;
+            // Update timestampEnd
+            activity.timestampEnd = newTimestampEnd;
             
             // Find new position and insert
-            const newIndex = this.findInsertIndex(newTimestamp);
+            const newIndex = this.findInsertIndex(newTimestampEnd);
             this.activities.splice(newIndex, 0, activity);
             
             needsRecalculation = true;
@@ -263,7 +284,7 @@ class DataManager {
 
     getRecentActivities(hours = 24) {
         const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
-        return this.activities.filter(a => a.timestamp >= cutoff);
+        return this.activities.filter(a => a.timestampEnd >= cutoff);
     }
 
     getActivitiesByDate(date) {
@@ -272,12 +293,12 @@ class DataManager {
         const end = new Date(start);
         end.setDate(end.getDate() + 1);
         
-        return this.activities.filter(a => a.timestamp >= start && a.timestamp < end);
+        return this.activities.filter(a => a.timestampEnd >= start && a.timestampEnd < end);
     }
 
     getTimeSummary(days = 1) {
         const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-        const recentActivities = this.activities.filter(a => a.timestamp >= cutoff);
+        const recentActivities = this.activities.filter(a => a.timestampEnd >= cutoff);
 
         let totalTime = 0;
         const activities = [];
@@ -288,7 +309,8 @@ class DataManager {
             activities.push({
                 activity: activity.activity,
                 duration: duration,
-                timestamp: activity.timestamp
+                timestampStart: activity.timestampStart,
+                timestampEnd: activity.timestampEnd
             });
         }
 
@@ -304,7 +326,7 @@ class DataManager {
         // Get activities from 00:00 today onwards
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const todaysActivities = this.activities.filter(a => a.timestamp >= today);
+        const todaysActivities = this.activities.filter(a => a.timestampEnd >= today);
 
         let totalTime = 0;
         const activities = [];
@@ -315,7 +337,8 @@ class DataManager {
             activities.push({
                 activity: activity.activity,
                 duration: duration,
-                timestamp: activity.timestamp
+                timestampStart: activity.timestampStart,
+                timestampEnd: activity.timestampEnd
             });
         }
 
@@ -346,7 +369,7 @@ class DataManager {
         const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
         
         const originalCount = this.activities.length;
-        this.activities = this.activities.filter(a => a.timestamp >= cutoff);
+        this.activities = this.activities.filter(a => a.timestampEnd >= cutoff);
         
         if (this.activities.length < originalCount) {
             this.saveActivities();
@@ -386,7 +409,8 @@ class DataManager {
             const validActivities = activities.filter(activity => {
                 return activity && 
                        activity.id && 
-                       activity.timestamp && 
+                       activity.timestampStart && 
+                       activity.timestampEnd && 
                        activity.activity;
             });
             
