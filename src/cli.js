@@ -618,6 +618,7 @@ program
     .description('Generate time tracking reports')
     .option('-p, --period <period>', 'Report period (today, week, month)', 'today')
     .option('-e, --export <format>', 'Export format (csv, json, ical)')
+    .option('-c, --chart', 'Display as ASCII bar chart')
     .action(async (options) => {
         try {
             // Determine date range and get summary
@@ -642,6 +643,12 @@ program
 
             if (options.export) {
                 await exportReport(summary, options.period, options.export);
+                return;
+            }
+
+            // Display chart if requested
+            if (options.chart) {
+                displayBarChart(summary, title);
                 return;
             }
 
@@ -1378,6 +1385,80 @@ function parseDuration(durationStr) {
     
     // Convert to minutes
     return Math.floor(durationMs / (1000 * 60));
+}
+
+function displayBarChart(summary, title) {
+    console.log(chalk.blue(`\n📊 ${title} - Bar Chart`));
+    console.log('='.repeat(50));
+    
+    if (summary.activities.length === 0) {
+        console.log(chalk.yellow('📋 No activities found for this period'));
+        return;
+    }
+    
+    // Group activities by name and sum their durations
+    const activityGroups = {};
+    summary.activities.forEach(activity => {
+        const key = activity.activity;
+        if (!activityGroups[key]) {
+            activityGroups[key] = {
+                name: key,
+                totalMinutes: 0,
+                count: 0
+            };
+        }
+        activityGroups[key].totalMinutes += activity.duration;
+        activityGroups[key].count += 1;
+    });
+    
+    // Convert to array and sort by duration (descending)
+    const sortedActivities = Object.values(activityGroups)
+        .sort((a, b) => b.totalMinutes - a.totalMinutes);
+    
+    // Find the maximum duration for scaling
+    const maxDuration = Math.max(...sortedActivities.map(a => a.totalMinutes));
+    const maxBarLength = 40; // Maximum bar length in characters
+    
+    // Display chart
+    console.log(chalk.gray(`Total time: ${(summary.totalTimeMinutes / 60).toFixed(1)}h | Activities: ${summary.activityCount}`));
+    console.log('');
+    
+    sortedActivities.forEach(activity => {
+        const barLength = Math.round((activity.totalMinutes / maxDuration) * maxBarLength);
+        const bar = '█'.repeat(barLength);
+        const hours = (activity.totalMinutes / 60).toFixed(1);
+        const minutes = activity.totalMinutes;
+        
+        // Truncate long activity names
+        const displayName = activity.name.length > 30 ? 
+            activity.name.substring(0, 27) + '...' : 
+            activity.name;
+        
+        // Format duration display
+        let durationDisplay;
+        if (minutes >= 60) {
+            const hours = Math.floor(minutes / 60);
+            const remainingMinutes = minutes % 60;
+            durationDisplay = remainingMinutes > 0 ? 
+                `${hours}h ${remainingMinutes}m` : 
+                `${hours}h`;
+        } else {
+            durationDisplay = `${minutes}m`;
+        }
+        
+        // Add count if more than 1 occurrence
+        const countDisplay = activity.count > 1 ? ` (${activity.count}x)` : '';
+        
+        console.log(
+            chalk.cyan(displayName.padEnd(30)) + 
+            ' ' + 
+            chalk.green(bar) + 
+            ' ' + 
+            chalk.yellow(durationDisplay + countDisplay)
+        );
+    });
+    
+    console.log(chalk.gray('\nLegend: █ = Time spent | Duration shown in hours/minutes'));
 }
 
 module.exports = program;
