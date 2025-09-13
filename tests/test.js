@@ -283,7 +283,7 @@ class TestSuite {
             // Cleanup exported files
             const files = await fs.readdir(path.join(__dirname, '..'));
             for (const file of files) {
-                if (file.startsWith('productivity_report_') && file.endsWith('.json')) {
+                if (file.startsWith('pulse_report_') && file.endsWith('.json')) {
                     await fs.remove(path.join(__dirname, '..', file));
                 }
             }

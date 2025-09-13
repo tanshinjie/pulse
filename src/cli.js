@@ -1245,7 +1245,7 @@ program
 // Export function
 async function exportReport(summary, period, format) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-    const filename = `productivity_report_${period}_${timestamp}.${format}`;
+    const filename = `pulse_report_${period}_${timestamp}.${format}`;
 
     try {
         if (format === 'json') {
