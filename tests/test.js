@@ -26,6 +26,7 @@ class TestSuite {
             { name: 'CLI Commands', fn: () => this.testCLICommands() },
             { name: 'Activity Logging', fn: () => this.testActivityLogging() },
             { name: 'Clear Command', fn: () => this.testClearCommand() },
+            { name: 'Uninstall Command', fn: () => this.testUninstallCommand() },
             { name: 'Report Generation', fn: () => this.testReportGeneration() },
             { name: 'Configuration', fn: () => this.testConfiguration() }
         ];
@@ -209,6 +210,46 @@ class TestSuite {
             console.log('✅ Data clearing verified');
         } catch (error) {
             throw new Error(`Clear verification failed: ${error.message}`);
+        }
+    }
+
+    async testUninstallCommand() {
+        console.log('🧪 Testing uninstall command...');
+        
+        // First create some data to uninstall
+        try {
+            execSync('node src/cli.js log "Test activity for uninstall"', { 
+                encoding: 'utf8',
+                cwd: path.join(__dirname, '..')
+            });
+            console.log('✅ Test data created for uninstall');
+        } catch (error) {
+            throw new Error(`Failed to create test data: ${error.message}`);
+        }
+
+        // Test uninstall with force flag
+        try {
+            const output = execSync('node src/cli.js uninstall --force', { 
+                encoding: 'utf8',
+                cwd: path.join(__dirname, '..')
+            });
+            if (!output.includes('Pulse uninstalled successfully!')) {
+                throw new Error('Uninstall command failed');
+            }
+            console.log('✅ Uninstall command working');
+        } catch (error) {
+            throw new Error(`Uninstall command failed: ${error.message}`);
+        }
+
+        // Verify data directory is removed
+        try {
+            const dataDir = path.join(os.homedir(), '.pulse_track_data');
+            if (fs.existsSync(dataDir)) {
+                throw new Error('Data directory still exists after uninstall');
+            }
+            console.log('✅ Data directory properly removed');
+        } catch (error) {
+            throw new Error(`Uninstall verification failed: ${error.message}`);
         }
     }
 

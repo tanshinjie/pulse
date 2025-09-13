@@ -1167,6 +1167,7 @@ program
     .command('clear')
     .description('Clear all activity data')
     .option('-f, --force', 'Skip confirmation prompt')
+    .option('--backups', 'Also clear backup files')
     .action(async (options) => {
         try {
             if (!options.force) {
@@ -1191,8 +1192,53 @@ program
 
             console.log(chalk.green('✅ All activity data cleared successfully!'));
             console.log(chalk.gray('💡 Configuration settings were preserved'));
+            
+            // Clean up backups if requested
+            if (options.backups) {
+                const backupCount = await dataManager.cleanupBackups();
+                if (backupCount > 0) {
+                    console.log(chalk.green(`✅ Also cleaned up ${backupCount} backup files`));
+                }
+            }
         } catch (error) {
             console.error(chalk.red('❌ Error clearing data:'), error.message);
+        }
+    });
+
+// Uninstall command
+program
+    .command('uninstall')
+    .description('Completely remove Pulse and all its data')
+    .option('-f, --force', 'Skip confirmation prompt')
+    .action(async (options) => {
+        try {
+            if (!options.force) {
+                const confirm = await inquirer.prompt([
+                    {
+                        type: 'confirm',
+                        name: 'proceed',
+                        message: '⚠️  Are you sure you want to UNINSTALL Pulse? This will delete ALL data including backups, config, and logs. This cannot be undone.',
+                        default: false
+                    }
+                ]);
+
+                if (!confirm.proceed) {
+                    console.log(chalk.yellow('Uninstall cancelled.'));
+                    return;
+                }
+            }
+
+            console.log(chalk.red('🗑️  Uninstalling Pulse...'));
+            
+            // Perform complete cleanup
+            await dataManager.completeCleanup();
+            
+            console.log(chalk.green('✅ Pulse uninstalled successfully!'));
+            console.log(chalk.gray('💡 All data has been removed from your system'));
+            console.log(chalk.gray('💡 You can reinstall anytime with: npm install -g pulse-track-cli'));
+            
+        } catch (error) {
+            console.error(chalk.red('❌ Error during uninstall:'), error.message);
         }
     });
 

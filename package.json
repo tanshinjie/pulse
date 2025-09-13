@@ -10,6 +10,7 @@
     "start": "node src/cli.js",
     "test": "node tests/test.js",
     "install-global": "npm install -g .",
+    "uninstall": "node src/cli.js uninstall --force",
     "daemon": "node src/cli.js start",
     "daemon-fg": "node src/cli.js start --foreground",
     "prepublishOnly": "npm test"

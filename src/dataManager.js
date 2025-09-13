@@ -594,6 +594,76 @@ class DataManager {
             return false;
         }
     }
+    
+    // Complete cleanup method for uninstall
+    async completeCleanup() {
+        try {
+            console.log('🧹 Starting complete data cleanup...');
+            
+            // Stop any running daemon first
+            if (this.isDaemonRunning()) {
+                console.log('🛑 Stopping daemon before cleanup...');
+                try {
+                    const pidFile = path.join(this.dataDir, 'tracker.pid');
+                    const pid = parseInt(fs.readFileSync(pidFile, 'utf8'));
+                    process.kill(pid, 'SIGTERM');
+                    
+                    // Wait a bit for graceful shutdown
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    // Force kill if still running
+                    try {
+                        process.kill(pid, 0);
+                        process.kill(pid, 'SIGKILL');
+                    } catch (error) {
+                        // Process already stopped
+                    }
+                } catch (error) {
+                    console.warn('Could not stop daemon:', error.message);
+                }
+            }
+            
+            // Remove entire data directory
+            if (fs.existsSync(this.dataDir)) {
+                console.log(`🗑️ Removing data directory: ${this.dataDir}`);
+                await fs.remove(this.dataDir);
+                console.log('✅ Data directory removed successfully');
+            } else {
+                console.log('ℹ️ No data directory found to clean up');
+            }
+            
+            return true;
+        } catch (error) {
+            console.error('❌ Error during complete cleanup:', error.message);
+            throw error;
+        }
+    }
+    
+    // Clean up backup files only
+    async cleanupBackups() {
+        try {
+            if (fs.existsSync(this.backupDir)) {
+                const backupFiles = fs.readdirSync(this.backupDir);
+                console.log(`🧹 Found ${backupFiles.length} backup files to clean up`);
+                
+                for (const file of backupFiles) {
+                    const filePath = path.join(this.backupDir, file);
+                    await fs.remove(filePath);
+                }
+                
+                // Remove backup directory if empty
+                await fs.remove(this.backupDir);
+                console.log('✅ Backup files cleaned up successfully');
+                return backupFiles.length;
+            } else {
+                console.log('ℹ️ No backup directory found');
+                return 0;
+            }
+        } catch (error) {
+            console.error('❌ Error cleaning up backups:', error.message);
+            throw error;
+        }
+    }
 }
 
 module.exports = { DataManager, Activity };

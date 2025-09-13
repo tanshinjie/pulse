@@ -1,7 +1,5 @@
 # Pulse
 
-![Pulse Banner](https://raw.githubusercontent.com/tanshinjie/pulse/main/assets/pulse_github_banner.png)
-
 > ⚠️ **Under Active Development**  
 > This project is currently under active development and is **not ready for production use**. Features may be incomplete, unstable, or subject to breaking changes. Please do not use this software for important productivity tracking until it reaches a stable release.
 
@@ -294,6 +292,9 @@ Clear data and export for analysis:
 # Clear all activity data (with confirmation)
 pulse clear
 
+# Clear activity data and backup files
+pulse clear --backups
+
 # Force clear without confirmation (useful for scripts)
 pulse clear --force
 
@@ -306,6 +307,57 @@ pulse report --period week --export json | jq '.activities'
 # CSV for spreadsheet analysis
 pulse report --period month --export csv
 ```
+
+### Uninstalling Pulse
+
+The uninstall process depends on how you installed Pulse:
+
+#### If installed globally (`npm install -g`)
+You need to run two commands:
+
+**Step 1: Remove all data and settings**
+```bash
+# Remove all data with confirmation prompt
+pulse uninstall
+
+# Force remove data without confirmation
+pulse uninstall --force
+```
+
+**Step 2: Remove the binary/executable**
+```bash
+npm uninstall -g pulse-track-cli
+```
+
+#### If using `npx` (no installation)
+You only need to remove the data:
+
+```bash
+# Remove all data with confirmation prompt
+npx pulse-track-cli uninstall
+
+# Force remove data without confirmation
+npx pulse-track-cli uninstall --force
+```
+
+#### If installed locally in a project
+```bash
+# Step 1: Remove data
+pulse uninstall
+
+# Step 2: Remove from project
+npm uninstall pulse-track-cli
+```
+
+**What gets removed:**
+- All activity data and backups
+- Configuration settings
+- Log files
+- Process files
+- Entire `~/.pulse_track_data/` directory
+- The `pulse` command/executable (if installed)
+
+> **Note**: With `npx`, there's no persistent binary to remove - only your data needs to be cleaned up.
 
 ## Troubleshooting
 
