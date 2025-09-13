@@ -6,6 +6,7 @@ const inquirer = require('inquirer');
 const fs = require('fs-extra');
 const path = require('path');
 const os = require('os');
+const ms = require('ms');
 
 const { DataManager } = require('./dataManager');
 const NotificationManager = require('./notificationManager');
@@ -114,6 +115,236 @@ program
                     process.exit(1);
                 }, 1500);
             }
+        }
+    });
+
+// Edit command
+program
+    .command('edit')
+    .description('Edit a previous activity entry')
+    .action(async () => {
+        try {
+            // Get recent activities (last 20)
+            const recentActivities = dataManager.activities
+                .slice(-20)
+                .reverse(); // Most recent first
+            
+            if (recentActivities.length === 0) {
+                console.log(chalk.yellow('⚠️  No activities found to edit'));
+                return;
+            }
+
+            // Select activity to edit
+            const activityChoices = recentActivities.map((activity, index) => {
+                const timeStr = activity.timestamp.toLocaleString();
+                const durationStr = activity.durationMinutes > 0 ? ` (${activity.durationMinutes}m)` : '';
+                return {
+                    name: `${timeStr} - ${activity.activity}${durationStr}`,
+                    value: activity.id,
+                    short: activity.activity
+                };
+            });
+
+            const { selectedId } = await inquirer.prompt([
+                {
+                    type: 'list',
+                    name: 'selectedId',
+                    message: '📝 Which activity would you like to edit?',
+                    choices: activityChoices,
+                    pageSize: 10
+                }
+            ]);
+
+            const selectedActivity = recentActivities.find(a => a.id === selectedId);
+            
+            // Select what to edit
+            const { editChoice } = await inquirer.prompt([
+                {
+                    type: 'list',
+                    name: 'editChoice',
+                    message: '✏️  What would you like to do?',
+                    choices: [
+                        { name: 'Edit Description', value: 'description' },
+                        { name: 'Edit Time', value: 'time' },
+                        { name: 'Edit Duration', value: 'duration' },
+                        { name: 'Edit Everything', value: 'all' },
+                        { name: '🗑️  Delete this activity', value: 'delete' }
+                    ]
+                }
+            ]);
+
+            // Handle delete option
+            if (editChoice === 'delete') {
+                const { confirmDelete } = await inquirer.prompt([
+                    {
+                        type: 'confirm',
+                        name: 'confirmDelete',
+                        message: `🗑️  Are you sure you want to delete "${selectedActivity.activity}"?`,
+                        default: false
+                    }
+                ]);
+
+                if (confirmDelete) {
+                    dataManager.deleteActivity(selectedId);
+                    
+                    // Log the deletion
+                    await logger.logActivity('deleted', selectedActivity.activity, {
+                        id: selectedActivity.id,
+                        timestamp: selectedActivity.timestamp.toISOString(),
+                        duration: selectedActivity.durationMinutes
+                    });
+
+                    console.log(chalk.green('✅ Activity deleted successfully'));
+                    console.log(chalk.gray('📝 Deleted:'), selectedActivity.activity);
+                    console.log(chalk.gray('⏰ Was at:'), selectedActivity.timestamp.toLocaleString());
+                } else {
+                    console.log(chalk.yellow('❌ Deletion cancelled'));
+                }
+                return;
+            }
+
+            const updates = {};
+
+            // Edit description
+            if (editChoice === 'description' || editChoice === 'all') {
+                const { newActivity } = await inquirer.prompt([
+                    {
+                        type: 'input',
+                        name: 'newActivity',
+                        message: '📝 New description:',
+                        default: selectedActivity.activity,
+                        validate: input => input.trim() !== '' || 'Description cannot be empty'
+                    }
+                ]);
+                updates.activity = newActivity;
+            }
+
+            // Edit timestamp
+            if (editChoice === 'time' || editChoice === 'all') {
+                // Show current time in local timezone
+                const currentLocalTime = selectedActivity.timestamp.toLocaleString('sv-SE').replace(' ', 'T').slice(0, 16);
+                
+                const { timeEditChoice } = await inquirer.prompt([
+                    {
+                        type: 'list',
+                        name: 'timeEditChoice',
+                        message: '⏰ How would you like to set the time?',
+                        choices: [
+                            { name: 'Specific date and time', value: 'datetime' },
+                            { name: 'Just the time (keep same date)', value: 'time' },
+                            { name: 'X minutes/hours ago', value: 'ago' },
+                            { name: 'Keep current time', value: 'keep' }
+                        ]
+                    }
+                ]);
+
+                if (timeEditChoice !== 'keep') {
+                    let newTimestamp;
+
+                    if (timeEditChoice === 'datetime') {
+                        const { newDatetime } = await inquirer.prompt([
+                            {
+                                type: 'input',
+                                name: 'newDatetime',
+                                message: '📅 New date and time (YYYY-MM-DD HH:MM):',
+                                default: currentLocalTime.replace('T', ' '),
+                                validate: input => {
+                                    const date = new Date(input);
+                                    return !isNaN(date.getTime()) || 'Invalid date/time format. Use YYYY-MM-DD HH:MM';
+                                }
+                            }
+                        ]);
+                        newTimestamp = new Date(newDatetime);
+                    } 
+                    else if (timeEditChoice === 'time') {
+                        const currentTimeOnly = selectedActivity.timestamp.toLocaleTimeString('en-GB', { 
+                            hour: '2-digit', 
+                            minute: '2-digit',
+                            hour12: false 
+                        });
+                        
+                        const { newTime } = await inquirer.prompt([
+                            {
+                                type: 'input',
+                                name: 'newTime',
+                                message: '🕐 New time (HH:MM):',
+                                default: currentTimeOnly,
+                                validate: input => {
+                                    const timeMatch = input.match(/^(\d{1,2}):(\d{2})$/);
+                                    if (!timeMatch) return 'Invalid time format. Use HH:MM';
+                                    
+                                    const hours = parseInt(timeMatch[1]);
+                                    const minutes = parseInt(timeMatch[2]);
+                                    
+                                    if (hours > 23 || minutes > 59) {
+                                        return 'Invalid time values';
+                                    }
+                                    return true;
+                                }
+                            }
+                        ]);
+                        
+                        // Create new timestamp with same date but new time
+                        newTimestamp = new Date(selectedActivity.timestamp);
+                        const [hours, minutes] = newTime.split(':').map(n => parseInt(n));
+                        newTimestamp.setHours(hours, minutes, 0, 0);
+                    }
+                    else if (timeEditChoice === 'ago') {
+                        const { agoInput } = await inquirer.prompt([
+                            {
+                                type: 'input',
+                                name: 'agoInput',
+                                message: '⏪ How long ago? (e.g., "30m", "2h", "1h 30m"):',
+                                validate: input => {
+                                    const duration = ms(input);
+                                    return duration !== undefined || 'Invalid duration format. Use formats like "30m", "2h", "1h 30m"';
+                                }
+                            }
+                        ]);
+                        
+                        const duration = ms(agoInput);
+                        newTimestamp = new Date(Date.now() - duration);
+                    }
+
+                    updates.timestamp = newTimestamp;
+                }
+            }
+
+            // Edit duration
+            if (editChoice === 'duration' || editChoice === 'all') {
+                const { newDuration } = await inquirer.prompt([
+                    {
+                        type: 'input',
+                        name: 'newDuration',
+                        message: '⏱️  New duration (minutes):',
+                        default: selectedActivity.durationMinutes.toString(),
+                        validate: input => {
+                            const num = parseInt(input);
+                            return (!isNaN(num) && num >= 0) || 'Duration must be a non-negative number';
+                        }
+                    }
+                ]);
+                updates.durationMinutes = parseInt(newDuration);
+            }
+
+            // Update the activity
+            const updatedActivity = dataManager.updateActivity(selectedId, updates);
+
+            // Log the update
+            await logger.logActivity('edited', updatedActivity.activity, {
+                id: updatedActivity.id,
+                timestamp: updatedActivity.timestamp.toISOString(),
+                duration: updatedActivity.durationMinutes,
+                changes: Object.keys(updates)
+            });
+
+            console.log(chalk.green('✅ Activity updated successfully:'));
+            console.log(chalk.blue('📝 Description:'), updatedActivity.activity);
+            console.log(chalk.blue('⏰ Time:'), updatedActivity.timestamp.toLocaleString());
+            console.log(chalk.blue('⏱️  Duration:'), `${updatedActivity.durationMinutes} minutes`);
+
+        } catch (error) {
+            console.error(chalk.red('❌ Error editing activity:'), error.message);
         }
     });
 
@@ -1050,26 +1281,13 @@ function parseTimestamp(options) {
     const now = new Date();
     
     if (options.ago) {
-        // Parse duration ago (e.g., "30m", "2h", "1h30m")
-        const match = options.ago.match(/^(\d+)([hm])(?:(\d+)m)?$/);
-        if (!match) {
-            throw new Error('Invalid ago format. Use formats like "30m", "2h", "1h30m"');
+        // Parse duration ago using ms library (e.g., "30m", "2h", "1h 30m")
+        const duration = ms(options.ago);
+        if (duration === undefined) {
+            throw new Error('Invalid ago format. Use formats like "30m", "2h", "1h 30m"');
         }
         
-        let minutes = 0;
-        const value = parseInt(match[1]);
-        const unit = match[2];
-        
-        if (unit === 'h') {
-            minutes = value * 60;
-            if (match[3]) { // Additional minutes (e.g., "1h30m")
-                minutes += parseInt(match[3]);
-            }
-        } else if (unit === 'm') {
-            minutes = value;
-        }
-        
-        return new Date(now.getTime() - minutes * 60 * 1000);
+        return new Date(now.getTime() - duration);
     }
     
     if (options.time) {

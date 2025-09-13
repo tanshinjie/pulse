@@ -200,6 +200,67 @@ class DataManager {
         }
     }
 
+    updateActivity(id, updates) {
+        const activityIndex = this.activities.findIndex(a => a.id === id);
+        if (activityIndex === -1) {
+            throw new Error('Activity not found');
+        }
+
+        const activity = this.activities[activityIndex];
+        let needsRecalculation = false;
+
+        // Update description if provided
+        if (updates.activity !== undefined) {
+            activity.activity = updates.activity;
+        }
+
+        // Update timestamp if provided
+        if (updates.timestamp !== undefined) {
+            const newTimestamp = new Date(updates.timestamp);
+            
+            // Remove activity from current position
+            this.activities.splice(activityIndex, 1);
+            
+            // Update timestamp
+            activity.timestamp = newTimestamp;
+            
+            // Find new position and insert
+            const newIndex = this.findInsertIndex(newTimestamp);
+            this.activities.splice(newIndex, 0, activity);
+            
+            needsRecalculation = true;
+        }
+
+        // Update duration if provided (this will override calculated duration)
+        if (updates.durationMinutes !== undefined) {
+            activity.durationMinutes = Math.max(0, parseInt(updates.durationMinutes));
+        }
+
+        // Recalculate all durations if timestamp was changed
+        if (needsRecalculation) {
+            this.recalculateDurations();
+        }
+
+        this.saveActivities();
+        return activity;
+    }
+
+    deleteActivity(id) {
+        const activityIndex = this.activities.findIndex(a => a.id === id);
+        if (activityIndex === -1) {
+            throw new Error('Activity not found');
+        }
+
+        // Remove the activity
+        this.activities.splice(activityIndex, 1);
+        
+        // Recalculate durations since we removed an activity
+        this.recalculateDurations();
+        
+        this.saveActivities();
+        return true;
+    }
+
     getRecentActivities(hours = 24) {
         const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
         return this.activities.filter(a => a.timestamp >= cutoff);
