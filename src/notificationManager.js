@@ -205,7 +205,7 @@ class NotificationManager {
         let message = `What have you been working on for the past ${interval} minutes?`;
         
         if (lastActivity) {
-            const timeSince = Math.floor((Date.now() - lastActivity.timestamp) / (1000 * 60));
+            const timeSince = Math.floor((Date.now() - lastActivity.timestampEnd) / (1000 * 60));
             if (timeSince < interval * 2) {
                 message += `\n\nLast logged: ${lastActivity.activity}`;
             }

@@ -143,7 +143,7 @@ program
 
             // Select activity to edit
             const activityChoices = recentActivities.map((activity, index) => {
-                const timeStr = activity.timestamp.toLocaleString();
+                const timeStr = activity.timestampEnd.toLocaleString();
                 const durationStr = activity.durationMinutes > 0 ? ` (${activity.durationMinutes}m)` : '';
                 return {
                     name: `${timeStr} - ${activity.activity}${durationStr}`,
@@ -203,7 +203,7 @@ program
 
                     console.log(chalk.green('✅ Activity deleted successfully'));
                     console.log(chalk.gray('📝 Deleted:'), selectedActivity.activity);
-                    console.log(chalk.gray('⏰ Was at:'), selectedActivity.timestamp.toLocaleString());
+                    console.log(chalk.gray('⏰ Was at:'), selectedActivity.timestampEnd.toLocaleString());
                 } else {
                     console.log(chalk.yellow('❌ Deletion cancelled'));
                 }
@@ -229,7 +229,7 @@ program
             // Edit timestamp
             if (editChoice === 'time' || editChoice === 'all') {
                 // Show current time in local timezone
-                const currentLocalTime = selectedActivity.timestamp.toLocaleString('sv-SE').replace(' ', 'T').slice(0, 16);
+                const currentLocalTime = selectedActivity.timestampEnd.toLocaleString('sv-SE').replace(' ', 'T').slice(0, 16);
                 
                 const { timeEditChoice } = await inquirer.prompt([
                     {
@@ -264,7 +264,7 @@ program
                         newTimestamp = new Date(newDatetime);
                     } 
                     else if (timeEditChoice === 'time') {
-                        const currentTimeOnly = selectedActivity.timestamp.toLocaleTimeString('en-GB', { 
+                        const currentTimeOnly = selectedActivity.timestampEnd.toLocaleTimeString('en-GB', { 
                             hour: '2-digit', 
                             minute: '2-digit',
                             hour12: false 
@@ -292,7 +292,7 @@ program
                         ]);
                         
                         // Create new timestamp with same date but new time
-                        newTimestamp = new Date(selectedActivity.timestamp);
+                        newTimestamp = new Date(selectedActivity.timestampEnd);
                         const [hours, minutes] = newTime.split(':').map(n => parseInt(n));
                         newTimestamp.setHours(hours, minutes, 0, 0);
                     }
@@ -313,7 +313,7 @@ program
                         newTimestamp = new Date(Date.now() - duration);
                     }
 
-                    updates.timestamp = newTimestamp;
+                    updates.timestampEnd = newTimestamp;
                 }
             }
 
@@ -347,7 +347,7 @@ program
 
             console.log(chalk.green('✅ Activity updated successfully:'));
             console.log(chalk.blue('📝 Description:'), updatedActivity.activity);
-            console.log(chalk.blue('⏰ Time:'), updatedActivity.timestamp.toLocaleString());
+            console.log(chalk.blue('⏰ Time:'), updatedActivity.timestampEnd.toLocaleString());
             console.log(chalk.blue('⏱️  Duration:'), `${updatedActivity.durationMinutes} minutes`);
 
         } catch (error) {
@@ -502,7 +502,7 @@ program
                 console.log(chalk.blue('\n📋 Recent activities (last 8 hours):'));
                 const recentReversed = recent.slice(-5).reverse();
                 recentReversed.forEach((activity, index) => {
-                    const timeStr = activity.timestamp.toLocaleTimeString('en-US', { 
+                    const timeStr = activity.timestampEnd.toLocaleTimeString('en-US', { 
                         hour: '2-digit', 
                         minute: '2-digit' 
                     });
@@ -511,7 +511,7 @@ program
                     let durationStr = '';
                     if (index < recentReversed.length - 1) {
                         const nextActivity = recentReversed[index + 1];
-                        const duration = Math.floor((activity.timestamp - nextActivity.timestamp) / (1000 * 60));
+                        const duration = Math.floor((activity.timestampEnd - nextActivity.timestampEnd) / (1000 * 60));
                         if (duration > 0) {
                             durationStr = chalk.gray(` (${duration}m)`);
                         }
@@ -643,7 +643,7 @@ program
                 console.log(chalk.blue('\n📋 Recent activities:'));
                 const activitiesReversed = summary.activities.slice(-10).reverse();
                 activitiesReversed.forEach((activity, index) => {
-                    const timeStr = activity.timestamp.toLocaleTimeString('en-US', { 
+                    const timeStr = activity.timestampEnd.toLocaleTimeString('en-US', { 
                         hour: '2-digit', 
                         minute: '2-digit' 
                     });
@@ -652,7 +652,7 @@ program
                     let durationStr = '';
                     if (index < activitiesReversed.length - 1) {
                         const nextActivity = activitiesReversed[index + 1];
-                        const duration = Math.floor((activity.timestamp - nextActivity.timestamp) / (1000 * 60));
+                        const duration = Math.floor((activity.timestampEnd - nextActivity.timestampEnd) / (1000 * 60));
                         if (duration > 0) {
                             durationStr = chalk.gray(` (${duration}m)`);
                         }
@@ -1043,7 +1043,7 @@ function displayLogEntry(entry, raw = false) {
         return;
     }
 
-    const timestamp = new Date(entry.timestamp).toLocaleString();
+    const timestamp = new Date(entry.timestampEnd).toLocaleString();
     const levelColor = {
         'DEBUG': 'gray',
         'INFO': 'blue',
@@ -1302,7 +1302,7 @@ function generateICAL(summary, period) {
     
     summary.activities.forEach((activity, index) => {
         if (activity.duration > 0) {
-            const endTime = activity.timestamp;
+            const endTime = activity.timestampEnd;
             const startTime = new Date(endTime.getTime() - activity.duration * 60 * 1000);
             
             // Clean activity text for iCal format
@@ -1310,7 +1310,7 @@ function generateICAL(summary, period) {
             
             icalContent.push(
                 'BEGIN:VEVENT',
-                `UID:pulse-activity-${activity.timestamp.getTime()}-${index}@pulse-tracker`,
+                `UID:pulse-activity-${activity.timestampEnd.getTime()}-${index}@pulse-tracker`,
                 `DTSTART:${formatICALDateTime(startTime)}`,
                 `DTEND:${formatICALDateTime(endTime)}`,
                 `DTSTAMP:${dtStamp}`,
