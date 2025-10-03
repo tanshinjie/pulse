@@ -1,3 +1,4 @@
+- Bug: The duration calculation when editing log is wrong
 - MCP to convert human intention to result
 - Export data for yesterday
 - Restarting computer wipe the data
