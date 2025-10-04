@@ -212,11 +212,20 @@ class DataManager {
                 // This represents how long was spent on the previous task
                 const duration = (current.timestampEnd - previous.timestampEnd) / (1000 * 60); // minutes
                 previous.durationMinutes = Math.max(0, Math.floor(duration));
+                
+                // Set current activity's timestampStart to previous activity's timestampEnd
+                // This ensures proper chronological flow
+                current.timestampStart = new Date(previous.timestampEnd);
             }
             
             // The current (most recent) activity always has 0 duration until next activity is logged
+            // But we preserve its timestampStart to maintain the timeline
             if (i === this.activities.length - 1) {
-                current.durationMinutes = 0;
+                // Only set timestampStart = timestampEnd if this is the very first activity
+                if (i === 0) {
+                    current.timestampStart = new Date(current.timestampEnd);
+                }
+                // For other activities, timestampStart was already set above from previous activity
             }
         }
     }
