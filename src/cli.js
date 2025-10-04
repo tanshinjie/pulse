@@ -617,32 +617,62 @@ program
     .command('report')
     .description('Generate time tracking reports')
     .option('-p, --period <period>', 'Report period (today, week, month)', 'today')
+    .option('-d, --date <date>', 'Report for specific date (YYYY-MM-DD format)')
     .option('-e, --export <format>', 'Export format (csv, json, ical)')
     .option('-c, --chart', 'Display as ASCII bar chart')
     .action(async (options) => {
         try {
             // Determine date range and get summary
-            let summary, title;
-            switch (options.period) {
-                case 'today':
-                    summary = dataManager.getTodaysSummary();
-                    title = "Today's Report";
-                    break;
-                case 'week':
-                    summary = dataManager.getTimeSummary(7);
-                    title = "Weekly Report";
-                    break;
-                case 'month':
-                    summary = dataManager.getTimeSummary(30);
-                    title = "Monthly Report";
-                    break;
-                default:
-                    console.error(chalk.red('❌ Invalid period. Use: today, week, or month'));
+            let summary, title, reportIdentifier;
+            
+            if (options.date) {
+                // Validate date format
+                const dateMatch = options.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+                if (!dateMatch) {
+                    console.error(chalk.red('❌ Invalid date format. Use YYYY-MM-DD (e.g., 2023-12-25)'));
                     return;
+                }
+                
+                const [, year, month, day] = dateMatch;
+                const reportDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+                
+                // Check if date is valid
+                if (isNaN(reportDate.getTime()) || 
+                    reportDate.getFullYear() !== parseInt(year) ||
+                    reportDate.getMonth() !== parseInt(month) - 1 ||
+                    reportDate.getDate() !== parseInt(day)) {
+                    console.error(chalk.red('❌ Invalid date. Please check the date values.'));
+                    return;
+                }
+                
+                summary = dataManager.getDateSummary(reportDate);
+                title = `Report for ${options.date}`;
+                reportIdentifier = options.date;
+            } else {
+                switch (options.period) {
+                    case 'today':
+                        summary = dataManager.getTodaysSummary();
+                        title = "Today's Report";
+                        reportIdentifier = 'today';
+                        break;
+                    case 'week':
+                        summary = dataManager.getTimeSummary(7);
+                        title = "Weekly Report";
+                        reportIdentifier = 'week';
+                        break;
+                    case 'month':
+                        summary = dataManager.getTimeSummary(30);
+                        title = "Monthly Report";
+                        reportIdentifier = 'month';
+                        break;
+                    default:
+                        console.error(chalk.red('❌ Invalid period. Use: today, week, or month'));
+                        return;
+                }
             }
 
             if (options.export) {
-                await exportReport(summary, options.period, options.export);
+                await exportReport(summary, reportIdentifier, options.export);
                 return;
             }
 
@@ -687,6 +717,7 @@ program
             }
 
             console.log(chalk.gray('\n💡 Use --export csv, --export json, or --export ical to export data'));
+            console.log(chalk.gray('💡 Use --date YYYY-MM-DD to get report for specific date (e.g., --date 2023-12-25)'));
         } catch (error) {
             console.error(chalk.red('❌ Error generating report:'), error.message);
         }
@@ -1240,7 +1271,10 @@ program
 // Export function
 async function exportReport(summary, period, format) {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-    const filename = `pulse_report_${period}_${timestamp}.${format}`;
+    
+    // Use specific date if available, otherwise use period
+    const reportIdentifier = summary.reportDate || period;
+    const filename = `pulse_report_${reportIdentifier}_${timestamp}.${format}`;
 
     try {
         if (format === 'json') {
@@ -1249,7 +1283,7 @@ async function exportReport(summary, period, format) {
             const csvContent = generateCSV(summary);
             await fs.writeFile(filename, csvContent);
         } else if (format === 'ical') {
-            const icalContent = generateICAL(summary, period);
+            const icalContent = generateICAL(summary, reportIdentifier);
             await fs.writeFile(filename, icalContent);
         } else {
             console.error(chalk.red('❌ Invalid export format. Use: csv, json, or ical'));

@@ -350,6 +350,42 @@ class DataManager {
         };
     }
 
+    getDateSummary(date) {
+        // Get activities for a specific date
+        const startOfDay = new Date(date);
+        startOfDay.setHours(0, 0, 0, 0);
+        const endOfDay = new Date(date);
+        endOfDay.setHours(23, 59, 59, 999);
+        
+        const dateActivities = this.activities.filter(a => 
+            a.timestampEnd >= startOfDay && a.timestampEnd <= endOfDay
+        );
+
+        let totalTime = 0;
+        const activities = [];
+
+        for (const activity of dateActivities) {
+            const duration = activity.durationMinutes;
+            totalTime += duration;
+            activities.push({
+                activity: activity.activity,
+                duration: duration,
+                timestampStart: activity.timestampStart,
+                timestampEnd: activity.timestampEnd
+            });
+        }
+
+        const dateString = date.toISOString().split('T')[0]; // YYYY-MM-DD format
+
+        return {
+            totalTimeMinutes: totalTime,
+            activities: activities,
+            activityCount: dateActivities.length,
+            periodDays: dateString,
+            reportDate: dateString
+        };
+    }
+
     setConfig(key, value) {
         if (key in this.config) {
             this.config[key] = value;
