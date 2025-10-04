@@ -139,6 +139,25 @@ program
         }
     });
 
+// Log-batch command
+program
+    .command('log-batch')
+    .description('Log multiple completed tasks with different start and end times')
+    .argument('[tasks...]', 'Task descriptions and time ranges (e.g., "Task 1" "10:00-11:30" "Task 2" "11:30-12:15" or "Task 1" "1000-1130" "Task 2" "1130-1215")')
+    .action(async (tasks) => {
+        try {
+            if (tasks.length > 0) {
+                // Command line mode - parse task/time pairs
+                await handleBatchLoggingCommandLine(tasks);
+            } else {
+                // Interactive mode
+                await handleBatchLoggingInteractive();
+            }
+        } catch (error) {
+            console.error(chalk.red('❌ Error in batch logging:'), error.message);
+        }
+    });
+
 // Edit command
 program
     .command('edit')
@@ -1493,6 +1512,340 @@ function displayBarChart(summary, title) {
     });
     
     console.log(chalk.gray('\nLegend: █ = Time spent | Duration shown in hours/minutes'));
+}
+
+// Batch logging helper functions
+async function handleBatchLoggingInteractive() {
+    console.log(chalk.blue('📝 Batch Task Logging - Interactive Mode'));
+    console.log(chalk.gray('Enter tasks (press Enter twice when done):\n'));
+    
+    const tasks = [];
+    let taskCount = 0;
+    
+    while (true) {
+        taskCount++;
+        
+        // Get task description
+        const { taskDescription } = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'taskDescription',
+                message: `Task ${taskCount} description:`,
+                validate: input => input.trim() !== '' || 'Task description cannot be empty'
+            }
+        ]);
+        
+        // Get start time with auto-suggestion
+        const suggestedStartTime = getSuggestedStartTime(tasks);
+        const { startTime } = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'startTime',
+                message: `Start time (HH:MM or HHMM)${suggestedStartTime ? ` [${suggestedStartTime}]` : ''}:`,
+                default: suggestedStartTime,
+                validate: input => {
+                    if (!input.trim()) return 'Start time is required';
+                    const timeMatch = input.match(/^(\d{1,2}):(\d{2})$/) || input.match(/^(\d{3,4})$/);
+                    if (!timeMatch) return 'Invalid time format. Use HH:MM or HHMM';
+                    
+                    let hours, minutes;
+                    if (timeMatch[2]) {
+                        // HH:MM format
+                        hours = parseInt(timeMatch[1]);
+                        minutes = parseInt(timeMatch[2]);
+                    } else {
+                        // HHMM format
+                        const timeStr = timeMatch[1].padStart(4, '0');
+                        hours = parseInt(timeStr.substring(0, 2));
+                        minutes = parseInt(timeStr.substring(2, 4));
+                    }
+                    
+                    if (hours > 23 || minutes > 59) {
+                        return 'Invalid time values';
+                    }
+                    return true;
+                }
+            }
+        ]);
+        
+        // Get end time
+        const { endTime } = await inquirer.prompt([
+            {
+                type: 'input',
+                name: 'endTime',
+                message: 'End time (HH:MM or HHMM):',
+                validate: input => {
+                    if (!input.trim()) return 'End time is required';
+                    const timeMatch = input.match(/^(\d{1,2}):(\d{2})$/) || input.match(/^(\d{3,4})$/);
+                    if (!timeMatch) return 'Invalid time format. Use HH:MM or HHMM';
+                    
+                    let hours, minutes;
+                    if (timeMatch[2]) {
+                        // HH:MM format
+                        hours = parseInt(timeMatch[1]);
+                        minutes = parseInt(timeMatch[2]);
+                    } else {
+                        // HHMM format
+                        const timeStr = timeMatch[1].padStart(4, '0');
+                        hours = parseInt(timeStr.substring(0, 2));
+                        minutes = parseInt(timeStr.substring(2, 4));
+                    }
+                    
+                    if (hours > 23 || minutes > 59) {
+                        return 'Invalid time values';
+                    }
+                    
+                    // Validate that end time is after start time
+                    const startTimeObj = parseTimeString(startTime);
+                    const endTimeObj = parseTimeString(input);
+                    
+                    if (endTimeObj <= startTimeObj) {
+                        return 'End time must be after start time';
+                    }
+                    
+                    return true;
+                }
+            }
+        ]);
+        
+        // Parse times and create task
+        const startTimeObj = parseTimeString(startTime);
+        const endTimeObj = parseTimeString(endTime);
+        
+        const task = {
+            description: taskDescription,
+            startTime: startTimeObj,
+            endTime: endTimeObj,
+            duration: Math.floor((endTimeObj - startTimeObj) / (1000 * 60)) // minutes
+        };
+        
+        tasks.push(task);
+        
+        // Ask if user wants to add another task
+        const { addAnother } = await inquirer.prompt([
+            {
+                type: 'confirm',
+                name: 'addAnother',
+                message: 'Add another task?',
+                default: true
+            }
+        ]);
+        
+        if (!addAnother) {
+            break;
+        }
+    }
+    
+    if (tasks.length === 0) {
+        console.log(chalk.yellow('⚠️  No tasks entered'));
+        return;
+    }
+    
+    // Show summary before saving
+    await showBatchSummary(tasks);
+    
+    // Ask for confirmation
+    const { confirm } = await inquirer.prompt([
+        {
+            type: 'confirm',
+            name: 'confirm',
+            message: 'Save these tasks?',
+            default: true
+        }
+    ]);
+    
+    if (confirm) {
+        await saveBatchTasks(tasks);
+    } else {
+        console.log(chalk.yellow('❌ Batch logging cancelled'));
+    }
+}
+
+async function handleBatchLoggingCommandLine(tasks) {
+    console.log(chalk.blue('📝 Batch Task Logging - Command Line Mode'));
+    
+    if (tasks.length % 2 !== 0) {
+        throw new Error('Invalid arguments. Provide task descriptions and time ranges in pairs (e.g., "Task 1" "10:00-11:30" "Task 2" "11:30-12:15")');
+    }
+    
+    const parsedTasks = [];
+    
+    for (let i = 0; i < tasks.length; i += 2) {
+        const description = tasks[i];
+        const timeRange = tasks[i + 1];
+        
+        // Parse time range (e.g., "10:00-11:30" or "1000-1130")
+        const timeMatch = timeRange.match(/^(\d{1,2}):(\d{2})-(\d{1,2}):(\d{2})$/) || 
+                         timeRange.match(/^(\d{3,4})-(\d{3,4})$/);
+        if (!timeMatch) {
+            throw new Error(`Invalid time range format: ${timeRange}. Use HH:MM-HH:MM or HHMM-HHMM`);
+        }
+        
+        let startTimeStr, endTimeStr;
+        if (timeMatch.length === 5) {
+            // HH:MM-HH:MM format (5 groups: full match + 4 captures)
+            const [, startHour, startMin, endHour, endMin] = timeMatch;
+            startTimeStr = `${startHour}:${startMin}`;
+            endTimeStr = `${endHour}:${endMin}`;
+        } else {
+            // HHMM-HHMM format (3 groups: full match + 2 captures)
+            const [, startTime, endTime] = timeMatch;
+            startTimeStr = startTime;
+            endTimeStr = endTime;
+        }
+        
+        const startTimeObj = parseTimeString(startTimeStr);
+        const endTimeObj = parseTimeString(endTimeStr);
+        
+        if (endTimeObj <= startTimeObj) {
+            throw new Error(`End time must be after start time for task: ${description}`);
+        }
+        
+        const task = {
+            description,
+            startTime: startTimeObj,
+            endTime: endTimeObj,
+            duration: Math.floor((endTimeObj - startTimeObj) / (1000 * 60)) // minutes
+        };
+        
+        parsedTasks.push(task);
+    }
+    
+    // Validate no overlaps
+    validateNoOverlaps(parsedTasks);
+    
+    // Show summary before saving
+    await showBatchSummary(parsedTasks);
+    
+    // Save tasks
+    await saveBatchTasks(parsedTasks);
+}
+
+function getSuggestedStartTime(tasks) {
+    if (tasks.length === 0) {
+        // If no previous tasks, suggest 00:00
+        return '00:00';
+    }
+    
+    // Get the end time of the last task
+    const lastTask = tasks[tasks.length - 1];
+    const endTime = lastTask.endTime;
+    
+    // Format as HH:MM
+    const hours = endTime.getHours().toString().padStart(2, '0');
+    const minutes = endTime.getMinutes().toString().padStart(2, '0');
+    
+    return `${hours}:${minutes}`;
+}
+
+function parseTimeString(timeStr) {
+    let hours, minutes;
+    
+    if (timeStr.includes(':')) {
+        // HH:MM format
+        [hours, minutes] = timeStr.split(':').map(n => parseInt(n));
+    } else {
+        // HHMM format
+        const paddedTime = timeStr.padStart(4, '0');
+        hours = parseInt(paddedTime.substring(0, 2));
+        minutes = parseInt(paddedTime.substring(2, 4));
+    }
+    
+    // Validate the parsed values
+    if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+        throw new Error(`Invalid time: ${timeStr}`);
+    }
+    
+    const today = new Date();
+    today.setHours(hours, minutes, 0, 0);
+    return today;
+}
+
+function validateNoOverlaps(tasks) {
+    for (let i = 0; i < tasks.length - 1; i++) {
+        const current = tasks[i];
+        const next = tasks[i + 1];
+        
+        if (current.endTime > next.startTime) {
+            throw new Error(`Time overlap detected: "${current.description}" ends at ${formatTime(current.endTime)} but "${next.description}" starts at ${formatTime(next.startTime)}`);
+        }
+    }
+}
+
+function formatTime(date) {
+    return date.toLocaleTimeString('en-GB', { 
+        hour: '2-digit', 
+        minute: '2-digit',
+        hour12: false 
+    });
+}
+
+async function showBatchSummary(tasks) {
+    console.log(chalk.blue('\n📋 Batch Summary'));
+    console.log('='.repeat(50));
+    
+    let totalDuration = 0;
+    
+    tasks.forEach((task, index) => {
+        const startTimeStr = formatTime(task.startTime);
+        const endTimeStr = formatTime(task.endTime);
+        const durationStr = task.duration >= 60 ? 
+            `${Math.floor(task.duration / 60)}h ${task.duration % 60}m` : 
+            `${task.duration}m`;
+        
+        console.log(`${index + 1}. ${chalk.cyan(task.description)}`);
+        console.log(`   ${chalk.gray(startTimeStr)} - ${chalk.gray(endTimeStr)} (${chalk.yellow(durationStr)})`);
+        
+        totalDuration += task.duration;
+    });
+    
+    const totalHours = Math.floor(totalDuration / 60);
+    const totalMinutes = totalDuration % 60;
+    const totalDurationStr = totalHours > 0 ? 
+        `${totalHours}h ${totalMinutes}m` : 
+        `${totalMinutes}m`;
+    
+    console.log(chalk.blue(`\nTotal time: ${chalk.green(totalDurationStr)}`));
+    console.log(chalk.blue(`Tasks: ${chalk.green(tasks.length)}`));
+}
+
+async function saveBatchTasks(tasks) {
+    console.log(chalk.blue('\n💾 Saving tasks...'));
+    
+    const savedActivities = [];
+    
+    for (const task of tasks) {
+        try {
+            const activity = dataManager.addActivity(
+                task.description,
+                task.endTime,
+                task.duration
+            );
+            
+            savedActivities.push(activity);
+            
+            // Log the activity
+            await logger.logActivity('logged_batch', task.description, {
+                timestamp: activity.timestampEnd.toISOString(),
+                duration: activity.durationMinutes,
+                id: activity.id,
+                batchMode: true
+            });
+            
+            console.log(chalk.green('✅'), task.description);
+        } catch (error) {
+            console.error(chalk.red('❌ Failed to save:'), task.description, error.message);
+        }
+    }
+    
+    console.log(chalk.green(`\n🎉 Successfully saved ${savedActivities.length} tasks!`));
+    
+    if (savedActivities.length > 0) {
+        const firstTask = savedActivities[0];
+        const lastTask = savedActivities[savedActivities.length - 1];
+        
+        console.log(chalk.gray(`📅 Time range: ${formatTime(firstTask.timestampStart)} - ${formatTime(lastTask.timestampEnd)}`));
+    }
 }
 
 module.exports = program;
