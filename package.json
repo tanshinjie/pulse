@@ -1,7 +1,7 @@
 {
   "name": "pulse-track-cli",
   "version": "1.0.1",
-  "description": "Mindful productivity tracking with rhythmic check-ins. A terminal-based app that sends periodic notifications and tracks time spent on activities.",
+  "description": "Time tracking with periodic notifications. Log activities and get reminded to track your work.",
   "main": "src/cli.js",
   "bin": {
     "pulse": "./bin/pulse"

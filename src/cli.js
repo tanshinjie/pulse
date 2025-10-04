@@ -26,12 +26,26 @@ const sessionManager = new SessionManager(daemonManager, dataManager, logger);
 program
     .name('pulse')
     .description('Pulse - Mindful productivity tracking with rhythmic check-ins')
-    .version('1.0.1');
+    .version('1.0.1')
+    .addHelpText('before', `
+${chalk.blue.bold('Pulse')} - Track your productivity with mindful check-ins
+
+${chalk.gray('A terminal-based app that sends periodic notifications asking "what are you working on?" and tracks your time automatically.')}
+
+${chalk.yellow('Quick Start:')}
+  ${chalk.green('pulse start')}           Start tracking
+  ${chalk.green('pulse log "message"')}   Log an activity  
+  ${chalk.green('pulse status')}          Check recent activities
+  ${chalk.green('pulse report')}          View time summary
+  ${chalk.green('pulse stop')}            Stop tracking
+
+${chalk.gray('For detailed help: pulse [command] --help')}
+`);
 
 // Log command
 program
     .command('log')
-    .description('Log what you\'ve been working on')
+    .description('Log an activity')
     .argument('[activity]', 'Activity description')
     .option('--close', 'Close terminal after logging (useful when called from notifications)')
     .option('-t, --time <time>', 'Log activity at specific time (HH:MM or YYYY-MM-DD HH:MM)')
@@ -142,7 +156,7 @@ program
 // Log-batch command
 program
     .command('log-batch')
-    .description('Log multiple completed tasks with different start and end times')
+    .description('Log multiple tasks with time ranges')
     .argument('[tasks...]', 'Task descriptions and time ranges (e.g., "Task 1" "10:00-11:30" "Task 2" "11:30-12:15" or "Task 1" "1000-1130" "Task 2" "1130-1215")')
     .action(async (tasks) => {
         try {
@@ -161,7 +175,7 @@ program
 // Edit command
 program
     .command('edit')
-    .description('Edit a previous activity entry')
+    .description('Edit an activity')
     .action(async () => {
         try {
             // Get recent activities (last 20)
@@ -391,7 +405,7 @@ program
 // Start command
 program
     .command('start')
-    .description('Start the pulse daemon')
+    .description('Start tracking')
     .option('-f, --foreground', 'Run in foreground (for testing)')
     .option('--daemon', 'Internal flag for daemon process (do not use manually)')
     .option('--safe', 'Use safe mode with enhanced error handling')
@@ -469,7 +483,7 @@ program
 // Stop command
 program
     .command('stop')
-    .description('Stop the pulse daemon')
+    .description('Stop tracking')
     .option('-f, --force', 'Force stop the daemon')
     .option('--cleanup', 'Clean up all duplicate daemon processes')
     .action(async (options) => {
@@ -506,7 +520,7 @@ program
 // Status command
 program
     .command('status')
-    .description('Show pulse status and recent activities')
+    .description('Show status and recent activities')
     .action(async () => {
         try {
             const status = daemonManager.getStatus();
@@ -634,7 +648,7 @@ program
 // Report command
 program
     .command('report')
-    .description('Generate time tracking reports')
+    .description('Generate time reports')
     .option('-p, --period <period>', 'Report period (today, week, month)', 'today')
     .option('-d, --date <date>', 'Report for specific date (YYYY-MM-DD format)')
     .option('-e, --export <format>', 'Export format (csv, json, ical)')

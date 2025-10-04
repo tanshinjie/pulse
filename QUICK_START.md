@@ -56,26 +56,26 @@
 
 ## Daily Workflow
 
-1. **Morning**: `pulse start`
+1. **Morning**: `pulse start` - Start tracking
 2. **Throughout day**: 
    - Respond to notifications, or
    - Manually log: `pulse log "what you're working on"`
 3. **Evening**: 
-   - `pulse report --period today`
-   - `pulse stop`
+   - `pulse report --period today` - Review your day
+   - `pulse stop` - Stop tracking
 
 ## Essential Commands
 
 ```bash
 # Core commands
-pulse start                    # Start notifications
+pulse start                    # Start tracking
 pulse log "message"            # Log activity
 pulse status                   # Check recent activities
 pulse report                   # View time summary
-pulse stop                     # Stop notifications
+pulse stop                     # Stop tracking
 
 # With options
-pulse log "coding" --category "Development"
+pulse log "coding" --duration "2h"
 pulse report --period week
 pulse config notificationInterval 45
 ```

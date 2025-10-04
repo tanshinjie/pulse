@@ -238,11 +238,15 @@ class DataManager {
 
         const activity = this.activities[activityIndex];
         let needsRecalculation = false;
+        let preserveDuration = false;
 
         // Update description if provided
         if (updates.activity !== undefined) {
             activity.activity = updates.activity;
         }
+
+        // Store original duration before any changes
+        const originalDuration = activity.durationMinutes;
 
         // Update timestampEnd if provided
         if (updates.timestampEnd !== undefined) {
@@ -264,10 +268,19 @@ class DataManager {
         // Update duration if provided (this will override calculated duration)
         if (updates.durationMinutes !== undefined) {
             activity.durationMinutes = Math.max(0, parseInt(updates.durationMinutes));
+            // When duration is explicitly set, update timestampStart accordingly
+            activity.timestampStart = new Date(activity.timestampEnd.getTime() - (activity.durationMinutes * 60 * 1000));
+            // Don't recalculate durations when duration is explicitly set
+            needsRecalculation = false;
+        } else if (updates.timestampEnd !== undefined) {
+            // If only timestampEnd was changed (no duration change), preserve the current duration
+            preserveDuration = true;
+            // Update timestampStart to maintain the original duration
+            activity.timestampStart = new Date(activity.timestampEnd.getTime() - (originalDuration * 60 * 1000));
         }
 
-        // Recalculate all durations if timestamp was changed
-        if (needsRecalculation) {
+        // Recalculate all durations if timestamp was changed, but only if we're not preserving duration
+        if (needsRecalculation && !preserveDuration) {
             this.recalculateDurations();
         }
 
