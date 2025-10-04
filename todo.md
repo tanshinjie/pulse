@@ -1,7 +1,3 @@
-- Bug: The duration calculation when editing log is wrong
-- MCP to convert human intention to result
-- Export data for yesterday
-- Restarting computer wipe the data
+- MCP to convert human text into action result
+- Bug: Restarting computer wipe the data
 - Feat: Cloud sync
-- Automatic merging
-- Huamn-readable summary
