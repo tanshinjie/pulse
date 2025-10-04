@@ -284,8 +284,8 @@ program
                         name: 'timeEditChoice',
                         message: '⏰ How would you like to set the time?',
                         choices: [
-                            { name: 'Specific date and time', value: 'datetime' },
                             { name: 'Just the time (keep same date)', value: 'time' },
+                            { name: 'Specific date and time', value: 'datetime' },
                             { name: 'X minutes/hours ago', value: 'ago' },
                             { name: 'Keep current time', value: 'keep' }
                         ]
